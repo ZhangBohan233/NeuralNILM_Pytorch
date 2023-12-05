@@ -3,8 +3,39 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import numpy as np
 from math import sqrt
+import datetime
+# from datetime import UTC
 
-_to_ordinalf_np_vectorized = np.vectorize(mdates._to_ordinalf)
+
+def _to_ordinalf(dt):
+    """
+    Convert :mod:`datetime` or :mod:`date` to the Gregorian date as UTC float
+    days, preserving hours, minutes, seconds and microseconds.  Return value
+    is a :func:`float`.
+    """
+    # Convert to UTC
+    tzi = getattr(dt, 'tzinfo', None)
+    if tzi is not None:
+        dt = dt.astimezone(mdates.UTC)
+        tzi = mdates.UTC
+
+    base = float(dt.toordinal())
+
+    # If it's sufficiently datetime-like, it will have a `date()` method
+    cdate = getattr(dt, 'date', lambda: None)()
+    if cdate is not None:
+        # Get a datetime object at midnight UTC
+        midnight_time = datetime.time(0, tzinfo=tzi)
+
+        rdt = datetime.datetime.combine(cdate, midnight_time)
+
+        # Append the seconds as a fraction of a day
+        base += (dt - rdt).total_seconds() / mdates.SEC_PER_DAY
+
+    return base
+
+
+_to_ordinalf_np_vectorized = np.vectorize(_to_ordinalf)
 
 
 def plot_series(series, ax=None, fig=None, 
