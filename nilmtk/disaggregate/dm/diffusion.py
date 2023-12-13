@@ -151,13 +151,6 @@ class ConditionalDiffusion(nn.Module):
         device = next(self.model.parameters()).device
         # condition=condition.repeat(2)
         condition = condition.to(device)
-        # condition_mask = torch.zeros_like(condition, device=device)  # weight
-        # print("cond", condition.shape, condition_mask.shape)
-        # condition = torch.cat((condition, condition_mask), 0)  # weight
-        # print(condition.shape)
-
-        # context_mask = torch.zeros_like(condition, device=device)
-        # context_mask[:n_sample] = 1
 
         # select sampler
         if sampler is None:
@@ -197,18 +190,61 @@ class ConditionalDiffusion(nn.Module):
             for i in tqdm(it, desc='diffusion sampling', total=num_timesteps) if verbose else it:
                 t = torch.full((b,), i, device=device, dtype=torch.long)
                 noise_level = self.forward_process.alphas_cumprod_sqrt[t]
-                z_t = self.model(x_t, condition, t=i, noise_level=noise_level.unsqueeze(-1), time=t)  # prediction of noise
+                z_t = self.model(x_t, condition, t=i, noise_level=noise_level.unsqueeze(-1),
+                                 time=t)  # prediction of noise
                 x_t = sampler(x_t, t, z_t)  # prediction of next state
 
             return x_t
 
-    def train_forward(self, output, condition, return_pred=False):
-        # b,c,h,w=output.shape  # for 2d
-        # print("Train shape", output.shape, condition.shape)
+    def full_forward(self,
+                     condition,
+                     ):
+        """
+            forward() function triggers a complete inference cycle
+
+            A custom sampler can be provided as an argument!
+        """
+
+        # read dimensions
+        # b,c,h,w=condition.shape  # for 2d
+        # print("Forward shape", condition.shape)
+        b, c, length = condition.shape  # for 1d
+        device = next(self.model.parameters()).device
+        # condition=condition.repeat(2)
+        condition = condition.to(device)
+
+        sampler = self.sampler
+
+        # time steps list
+        num_timesteps = sampler.num_timesteps
+        it = reversed(range(0, num_timesteps))
+
+        x_t = torch.randn([b, self.generated_channels, length], device=device)
+
+        for i in it:
+            t = torch.full((b,), i, device=device, dtype=torch.long)
+            noise_level = self.forward_process.alphas_cumprod_sqrt[t]
+            z_t = self.model(x_t, condition, t=i, noise_level=noise_level.unsqueeze(-1),
+                             time=t)  # prediction of noise
+            x_t = sampler(x_t, t, z_t)  # prediction of next state
+
+        return x_t
+
+    def forward_step(self, condition, x_t, t):
+        b, c, length = condition.shape  # for 1d
+        device = next(self.model.parameters()).device
+        # condition=condition.repeat(2)
+        condition = condition.to(device)
+
+        noise_level = self.forward_process.alphas_cumprod_sqrt[t]
+        noise_level = noise_level.unsqueeze(-1)
+        z_t = self.model(x_t, condition, t=None,
+                         noise_level=noise_level, time=t)
+        return z_t / noise_level.unsqueeze(-1)
+
+    def train_step(self, output, condition, return_pred=False):
         b, c, length = output.shape  # for 1d
         device = output.device
-
-        # loss for training
 
         # input is the optional condition
         t = torch.randint(0, self.forward_process.num_timesteps, (b,), device=device).long()
@@ -218,17 +254,26 @@ class ConditionalDiffusion(nn.Module):
         # print(output_noisy.shape, condition.shape)
 
         # reverse pass
-        # model_input = torch.cat([output_noisy, condition], 1).to(device)
         noise_hat = self.model(output_noisy, condition, t=None,
                                noise_level=noise_level.unsqueeze(-1), time=t)
 
         return noise, noise_hat
-        # # apply loss
-        # loss = self.loss_fn(noise, noise_hat)
-        # if return_pred:
-        #     return loss, t, output - noise_hat
-        # else:
-        #     return loss
+
+    def train_step_fixed(self, output, condition, t):
+        # b, c, length = output.shape  # for 1d
+        # device = output.device
+
+        # input is the optional condition
+        output_noisy, noise, noise_level = self.forward_process(
+            output, t, return_noise=True, rand_level=self.rand_level)
+
+        # print(output_noisy.shape, condition.shape)
+
+        # reverse pass
+        noise_hat = self.model(output_noisy, condition, t=None,
+                               noise_level=noise_level.unsqueeze(-1), time=t)
+
+        return noise, noise_hat
 
     def p_loss(self, output, condition, return_pred=False):
         """

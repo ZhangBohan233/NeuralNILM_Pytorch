@@ -24,6 +24,7 @@ class API():
         self.artificial_aggregate = False
         self.train_submeters = []
         self.train_mains = pd.DataFrame()
+        self.transfer_mains = pd.DataFrame()
         self.test_submeters = []
         self.test_mains = pd.DataFrame()
         self.gt_overall = {}
@@ -45,6 +46,10 @@ class API():
 
         self.pre_trained = params['pre_trained']
         self.train_datasets_dict = params['train']['datasets']
+        if 'transfer' in params:
+            self.transfer_dataset_dict = params['transfer']['datasets']
+        else:
+            self.transfer_dataset_dict = None
         self.test_datasets_dict = params['test']['datasets']
         self.metrics = params['test']['metrics']
         self.methods = params['methods']
@@ -57,6 +62,7 @@ class API():
 
         self.store_classifier_instances()
         d = self.train_datasets_dict
+        trans = self.transfer_dataset_dict
 
         for model_name, clf in self.classifiers:
             # If the model is a neural net, it has an attribute n_epochs, Ex: DAE, Seq2Point
@@ -68,7 +74,7 @@ class API():
                     continue
 
             print("Joint training for ", clf.MODEL_NAME)
-            self.train_jointly(clf, d)
+            self.train_jointly(clf, d, trans)
             print("Finished training for ", clf.MODEL_NAME)
 
         d = self.test_datasets_dict
@@ -76,7 +82,7 @@ class API():
         print("Joint Testing for all algorithms")
         self.test_jointly(d)
 
-    def train_jointly(self, clf, d):
+    def train_jointly(self, clf, d, trans_d=None):
         # This function has a few issues, which should be addressed soon
         print("............... Loading Data for training ...................")
         # Store the train_main readings for all buildings
@@ -93,17 +99,14 @@ class API():
                     train.buildings[building].elec.mains().load(physical_quantity='power',
                                                                 ac_type=all_type_power,
                                                                 sample_period=self.sample_period))
-                train_df['active'] = train_df['power']['active']
-                # train_df['apparent'] = train_df['power']['apparent']
+                if 'active' in train_df['power']:
+                    train_df['active'] = train_df['power']['active']
+                if 'apparent' in train_df['power']:
+                    train_df['apparent'] = train_df['power']['apparent']
                 # train_df['reactive'] = np.sqrt(
                 #     train_df['power']['apparent'] ** 2 - train_df['power']['active'] ** 2)
                 train_df.drop(['power'], axis=1, inplace=True)
                 train_df = train_df[self.power['mains']]
-                # print(train_df.columns)
-                # print(train_df.shape)
-                # print(train_df)
-                # train_df = train_df[[list(train_df.columns)[0]]]
-                # print(train_df.shape)
 
                 appliance_readings = []
                 for appliance_name in self.appliances:
@@ -127,13 +130,64 @@ class API():
                 for i, appliance_name in enumerate(self.appliances):
                     self.train_submeters[i] = self.train_submeters[i].append(appliance_readings[i])
 
+        if trans_d is not None:
+            for dataset in trans_d:
+                print("Loading transfer data for ", dataset, " dataset")
+                transfer = DataSet(trans_d[dataset]['path'])
+                for building in trans_d[dataset]['buildings']:
+                    print("Loading building ... ", building)
+                    transfer.set_window(start=trans_d[dataset]['buildings'][building]['start_time'],
+                                        end=trans_d[dataset]['buildings'][building]['end_time'])
+                    transfer_df = next(
+                        transfer.buildings[building].elec.mains().load(physical_quantity='power',
+                                                                       ac_type=all_type_power,
+                                                                       sample_period=self.sample_period))
+                    if 'active' in transfer_df['power']:
+                        transfer_df['active'] = transfer_df['power']['active']
+                    if 'apparent' in transfer_df['power']:
+                        transfer_df['apparent'] = transfer_df['power']['apparent']
+                    # train_df['reactive'] = np.sqrt(
+                    #     train_df['power']['apparent'] ** 2 - train_df['power']['active'] ** 2)
+                    transfer_df.drop(['power'], axis=1, inplace=True)
+                    transfer_df = transfer_df[self.power['mains']]
+
+                    appliance_readings = []
+                    # for appliance_name in self.appliances:
+                    #     appliance_df = next(transfer.buildings[building].elec[appliance_name].load(
+                    #         physical_quantity='power', ac_type=self.power['appliance'],
+                    #         sample_period=self.sample_period))
+                    #     # appliance_df = appliance_df[[list(appliance_df.columns)[0]]]
+                    #     appliance_readings.append(appliance_df)
+                    if self.DROP_ALL_NANS:
+                        transfer_df, _ = (
+                            self.dropna(transfer_df, []))
+                    # if self.artificial_aggregate:
+                    #     print("Creating an Artificial Aggregate for Transfer")
+                    #     transfer_df = pd.DataFrame(np.zeros(appliance_readings[0].shape),
+                    #                                index=appliance_readings[0].index,
+                    #                                columns=appliance_readings[0].columns)
+                    #     for app_reading in appliance_readings:
+                    #         transfer_df += app_reading
+
+                    print("Transfer Jointly")
+                    self.transfer_mains = self.transfer_mains.append(transfer_df)
+                    # for i, appliance_name in enumerate(self.appliances):
+                    #     self.train_submeters[i] = self.train_submeters[i].append(
+                    #         appliance_readings[i])
+
         appliance_readings = []
         for i, appliance_name in enumerate(self.appliances):
             appliance_readings.append((appliance_name, [self.train_submeters[i]]))
 
         self.train_mains = [self.train_mains]
+        self.transfer_mains = [self.transfer_mains]
         self.train_submeters = appliance_readings
-        clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True)
+        # print(type(self.train_mains), type(self.transfer_mains))
+        if self.transfer_dataset_dict is not None:
+            clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True,
+                            dst_main=self.transfer_mains)
+        else:
+            clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True)
 
     def test_jointly(self, d):
         # Store the test_main readings for all buildings
@@ -147,10 +201,12 @@ class API():
                     test.buildings[building].elec.mains().load(physical_quantity='power',
                                                                ac_type=all_type_power,
                                                                sample_period=self.sample_period))
-                test_mains['active'] = test_mains['power']['active']
-                test_mains['apparent'] = test_mains['power']['apparent']
-                test_mains['reactive'] = np.sqrt(
-                    test_mains['power']['apparent'] ** 2 - test_mains['power']['active'] ** 2)
+                if 'active' in test_mains['power']:
+                    test_mains['active'] = test_mains['power']['active']
+                if 'apparent' in test_mains['power']:
+                    test_mains['apparent'] = test_mains['power']['apparent']
+                # test_mains['reactive'] = np.sqrt(
+                #     test_mains['power']['apparent'] ** 2 - test_mains['power']['active'] ** 2)
                 test_mains.drop(['power'], axis=1, inplace=True)
                 test_mains = test_mains[self.power['mains']]
                 '''
@@ -281,10 +337,13 @@ class API():
         for app_name in concat_pred_df.columns:
             app_series_values = concat_pred_df[app_name].values.flatten()
             # Neural nets do extra padding sometimes, to fit, so get rid of extra predictions
-            app_series_values = app_series_values[:len(gt_overall[app_name])]
+            length = len(gt_overall[app_name])
+            app_series_values = app_series_values[:length]
+            # print(app_series_values)
+            # print(gt_overall[app_name])
             pred[app_name] = pd.Series(app_series_values, index=gt_overall.index)
         pred_overall = pd.DataFrame(pred, dtype='float32')
-        print(pred_overall)
+        # print(pred_overall)
         return gt_overall, pred_overall
 
     # metrics

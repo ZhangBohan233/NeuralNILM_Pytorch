@@ -12,6 +12,7 @@ with warnings.catch_warnings():
     from nilmtk.appliance import Appliance
     from nilmtk.building import Building
     from nilmtk.dataset import DataSet
+    from nilmtk.gpu_dataset import GpuDataset
 
 global_meter_group = MeterGroup()
 

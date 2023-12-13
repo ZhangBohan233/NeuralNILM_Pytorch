@@ -26,11 +26,11 @@ class DDPM_Sampler(nn.Module):
         self.register_buffer('alphas_sqrt', self.alphas.sqrt())
         self.register_buffer('alphas_sqrt_recip', 1 / self.alphas_sqrt)
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def forward(self, *args, **kwargs):
         return self.step(*args, **kwargs)
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def step(self, x_t, t, z_t):
         """
             Given approximation of noise z_t in x_t predict x_(t-1)

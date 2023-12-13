@@ -277,7 +277,7 @@ class Seq2Point(Disaggregator):
                     app_mean = self.appliance_params[app_name]['mean']
                     app_std = self.appliance_params[app_name]['std']
                 else:
-                    print ("Parameters for ", app_name ," were not found!")
+                    print("Parameters for ", app_name ," were not found!")
                     raise ApplianceNotFoundError()
 
                 processed_appliance_dfs = []
