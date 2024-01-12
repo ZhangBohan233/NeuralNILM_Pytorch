@@ -20,7 +20,7 @@ class DDIM_Sampler2(nn.Module):
 
     def __init__(self,
                  model,
-                 num_timesteps=100,
+                 num_timesteps=8,
                  clip_sample=True,
                  schedule=None
                  ):

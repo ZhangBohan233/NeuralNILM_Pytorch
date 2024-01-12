@@ -67,7 +67,7 @@ class GaussianForward(nn.Module):
         self.register_buffer('alphas_sqrt', self.alphas.sqrt())
 
     @torch.no_grad()
-    def forward(self, x_0, t, return_noise=False, rand_level=False):
+    def forward(self, x_0, t, return_noise=False, rand_level=False, predefined_noise=None):
         """
             Get noisy sample at t given x_0
 
@@ -86,7 +86,11 @@ class GaussianForward(nn.Module):
         mean = x_0 * noise_level.view(b, 1, 1)  # 2d就是3个1
         std = self.alphas_one_minus_cumprod_sqrt[t].view(b, 1, 1)
 
-        noise = torch.randn_like(x_0)
+        if predefined_noise is None:
+            noise = torch.randn_like(x_0)  # todo: 这里改了
+        else:
+            noise = predefined_noise
+
         output = mean + std * noise
 
         if not return_noise:
@@ -95,7 +99,7 @@ class GaussianForward(nn.Module):
             return output, noise, noise_level
 
     @torch.no_grad()
-    def step(self, x_t, t, return_noise=False):
+    def step(self, x_t, t, return_noise=False, predefined_noise=None):
         """
             Get next sample in the process
 
@@ -106,7 +110,11 @@ class GaussianForward(nn.Module):
         mean = self.alphas_sqrt[t] * x_t
         std = self.betas_sqrt[t]
 
-        noise = torch.randn_like(x_t)  # todo: 这里改了
+        if predefined_noise is None:
+            noise = torch.randn_like(x_t)  # todo: 这里改了
+        else:
+            noise = predefined_noise
+
         output = mean + std * noise
 
         if not return_noise:

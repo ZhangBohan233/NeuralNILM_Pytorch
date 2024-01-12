@@ -80,7 +80,8 @@ class PreNorm(nn.Module):
 class ConvNextBlock1D(nn.Module):
     """ https://arxiv.org/abs/2201.03545 """
 
-    def __init__(self, dim, dim_out, *, time_emb_dim=None, mult=2, norm=True):
+    def __init__(self, dim, dim_out, *, time_emb_dim=None, mult=2, norm=True,
+                 ft_container=None):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.GELU(),
@@ -89,8 +90,12 @@ class ConvNextBlock1D(nn.Module):
 
         self.ds_conv = nn.Conv1d(dim, dim, 7, padding=3, groups=dim)
 
+        layer_norm = LayerNorm(dim) if norm else nn.Identity()
+        if norm and ft_container is not None:
+            ft_container.append(layer_norm)
+
         self.net = nn.Sequential(
-            LayerNorm(dim) if norm else nn.Identity(),
+            layer_norm,
             nn.Conv1d(dim, dim_out * mult, 3, padding=1),
             nn.GELU(),
             nn.Conv1d(dim_out * mult, dim_out, 3, padding=1)
@@ -139,6 +144,7 @@ class UNet1D(nn.Module):
     def __init__(
             self,
             dim,
+            sequence_length=480,
             out_dim=None,
             dim_mults=(1, 2, 4, 8),
             channels=3,
@@ -151,6 +157,7 @@ class UNet1D(nn.Module):
         self.residual = residual
         print("Is Time embed used ? ", with_time_emb)
         self.output_mean_scale = output_mean_scale
+        self.sequence_length = sequence_length
 
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -178,30 +185,49 @@ class UNet1D(nn.Module):
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
 
+        self.fine_tunes = []
+
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
 
+            res = Residual(PreNorm(dim_out, LinearAttention(dim_out)))
+            ds = Downsample(dim_out) if not is_last else nn.Identity()
+            self.fine_tunes.append(res)
+            self.fine_tunes.append(ds)
+
             self.downs.append(nn.ModuleList([
-                ConvNextBlock1D(dim_in, dim_out, time_emb_dim=time_dim, norm=ind != 0),
-                ConvNextBlock1D(dim_out, dim_out, time_emb_dim=time_dim),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),  # 临时
-                Downsample(dim_out) if not is_last else nn.Identity()
+                ConvNextBlock1D(dim_in, dim_out, time_emb_dim=time_dim, norm=ind != 0,
+                                ft_container=self.fine_tunes),
+                ConvNextBlock1D(dim_out, dim_out, time_emb_dim=time_dim,
+                                ft_container=self.fine_tunes),
+                res,
+                ds
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ConvNextBlock1D(mid_dim, mid_dim, time_emb_dim=time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim)))  # 临时
-        self.mid_attn = nn.Identity()
-        self.mid_block2 = ConvNextBlock1D(mid_dim, mid_dim, time_emb_dim=time_dim)
+        self.mid_block1 = ConvNextBlock1D(mid_dim, mid_dim, time_emb_dim=time_dim,
+                                          ft_container=self.fine_tunes)
+        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim)))
+        self.fine_tunes.append(self.mid_attn)
+        # self.mid_attn = nn.Identity()
+        self.mid_block2 = ConvNextBlock1D(mid_dim, mid_dim, time_emb_dim=time_dim,
+                                          ft_container=self.fine_tunes)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
+            res = Residual(PreNorm(dim_in, LinearAttention(dim_in)))
+            us = Upsample(dim_in) if not is_last else nn.Identity()
+            self.fine_tunes.append(res)
+            self.fine_tunes.append(us)
+
             self.ups.append(nn.ModuleList([
-                ConvNextBlock1D(dim_out * 2, dim_in, time_emb_dim=time_dim),
-                ConvNextBlock1D(dim_in, dim_in, time_emb_dim=time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),  # 临时
-                Upsample(dim_in) if not is_last else nn.Identity()
+                ConvNextBlock1D(dim_out * 2, dim_in, time_emb_dim=time_dim,
+                                ft_container=self.fine_tunes),
+                ConvNextBlock1D(dim_in, dim_in, time_emb_dim=time_dim,
+                                ft_container=self.fine_tunes),
+                res,
+                us
             ]))
 
         out_dim = default(out_dim, channels)
@@ -210,6 +236,9 @@ class UNet1D(nn.Module):
             nn.Conv1d(dim, out_dim, 1),
             # nn.Tanh() # ADDED
         )
+        self.fine_tunes.append(self.final_conv)
+
+        # self.final_fc = nn.Linear(sequence_length, sequence_length)
 
     def forward(self, output_noisy, condition=None, t=None, noise_level=None, time=None):
         # print(x.shape, time.shape if time is not None else "")
@@ -220,11 +249,11 @@ class UNet1D(nn.Module):
 
         orig_x = x
         t = None
-        if time is not None and exists(self.time_mlp):
-            t = self.time_mlp(time)
-        # if noise_level is not None and exists(self.time_mlp):
-        #     noise_level = noise_level.squeeze(1)
-        #     t = self.time_mlp(noise_level)
+        # if time is not None and exists(self.time_mlp):
+        #     t = self.time_mlp(time)
+        if noise_level is not None and exists(self.time_mlp):
+            noise_level = noise_level.squeeze(1)
+            t = self.time_mlp(noise_level)
 
         original_mean = torch.mean(x, [1, 2], keepdim=True)
         h = []
@@ -232,19 +261,20 @@ class UNet1D(nn.Module):
         for convnext, convnext2, attn, downsample in self.downs:
             x = convnext(x, t)
             x = convnext2(x, t)
-            x = attn(x)  # 临时
+            x = attn(x)
             h.append(x)
             x = downsample(x)
 
         x = self.mid_block1(x, t)
-        x = self.mid_attn(x)  # 临时
+        x = self.mid_attn(x)
         x = self.mid_block2(x, t)
 
         for convnext, convnext2, attn, upsample in self.ups:
+            # skip connection is h
             x = torch.cat((x, h.pop()), dim=1)
             x = convnext(x, t)
             x = convnext2(x, t)
-            x = attn(x)  # 临时
+            x = attn(x)
             x = upsample(x)
         if self.residual:
             return self.final_conv(x) + orig_x
@@ -254,4 +284,46 @@ class UNet1D(nn.Module):
             out_mean = torch.mean(out, [1, 2], keepdim=True)
             out = out - original_mean + out_mean
 
+        # print(out.shape)
+        # out = self.final_fc(out)
+
         return out
+
+    def freeze(self, freeze=True):
+        req_grad = not freeze
+
+        for param in self.parameters():
+            param.requires_grad = req_grad
+
+        # for module in self.modules():
+        #     if (isinstance(module, LinearAttention) or
+        #             isinstance(module, Residual)):
+        #             # isinstance(module, Downsample) or isinstance(module, Upsample)):
+        #         for param in module.parameters():
+        #             param.requires_grad = True
+        #         print(type(module))
+        #
+        # for param in self.final_conv.parameters():
+        #     param.requires_grad = True
+        #
+        for layer in self.fine_tunes:
+            print(type(layer))
+            for param in layer.parameters():
+                param.requires_grad = True
+
+        # def freeze_module(m):
+        #     if isinstance(m, nn.ModuleList) or isinstance(m, nn.Sequential):
+        #         for mod in m:
+        #             freeze_module(mod)
+        #     # elif
+        #     elif isinstance(m, Residual) or isinstance(m, LinearAttention):
+        #         for par in m.parameters():
+        #             par.requires_grad = True
+        #         print(type(m), len(list(m.parameters())), "+")
+        #     else:
+        #         pass
+        #         # m.requires_grad_(req_grad)
+        #         print(type(m), len(list(m.parameters())), "-")
+        #
+        # for module in self.modules():
+        #     freeze_module(module)

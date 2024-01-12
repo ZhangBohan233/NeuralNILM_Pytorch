@@ -3,4 +3,5 @@
 *.csv
 *.h5
 *.pyc
+*.pkl
 /runs

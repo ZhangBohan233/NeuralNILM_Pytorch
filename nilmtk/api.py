@@ -25,6 +25,7 @@ class API():
         self.train_submeters = []
         self.train_mains = pd.DataFrame()
         self.transfer_mains = pd.DataFrame()
+        self.transfer_submeters = []
         self.test_submeters = []
         self.test_mains = pd.DataFrame()
         self.gt_overall = {}
@@ -131,6 +132,7 @@ class API():
                     self.train_submeters[i] = self.train_submeters[i].append(appliance_readings[i])
 
         if trans_d is not None:
+            self.transfer_submeters = [pd.DataFrame() for i in range(len(self.appliances))]
             for dataset in trans_d:
                 print("Loading transfer data for ", dataset, " dataset")
                 transfer = DataSet(trans_d[dataset]['path'])
@@ -152,15 +154,15 @@ class API():
                     transfer_df = transfer_df[self.power['mains']]
 
                     appliance_readings = []
-                    # for appliance_name in self.appliances:
-                    #     appliance_df = next(transfer.buildings[building].elec[appliance_name].load(
-                    #         physical_quantity='power', ac_type=self.power['appliance'],
-                    #         sample_period=self.sample_period))
-                    #     # appliance_df = appliance_df[[list(appliance_df.columns)[0]]]
-                    #     appliance_readings.append(appliance_df)
+                    for appliance_name in self.appliances:
+                        appliance_df = next(transfer.buildings[building].elec[appliance_name].load(
+                            physical_quantity='power', ac_type=self.power['appliance'],
+                            sample_period=self.sample_period))
+                        # appliance_df = appliance_df[[list(appliance_df.columns)[0]]]
+                        appliance_readings.append(appliance_df)
                     if self.DROP_ALL_NANS:
-                        transfer_df, _ = (
-                            self.dropna(transfer_df, []))
+                        transfer_df, appliance_readings = (
+                            self.dropna(transfer_df, appliance_readings))
                     # if self.artificial_aggregate:
                     #     print("Creating an Artificial Aggregate for Transfer")
                     #     transfer_df = pd.DataFrame(np.zeros(appliance_readings[0].shape),
@@ -171,21 +173,34 @@ class API():
 
                     print("Transfer Jointly")
                     self.transfer_mains = self.transfer_mains.append(transfer_df)
-                    # for i, appliance_name in enumerate(self.appliances):
-                    #     self.train_submeters[i] = self.train_submeters[i].append(
-                    #         appliance_readings[i])
+                    for i, appliance_name in enumerate(self.appliances):
+                        self.transfer_submeters[i] = self.transfer_submeters[i].append(
+                            appliance_readings[i])
+
+                    # plt.figure(figsize=(28, 10))
+                    # plt.plot(self.transfer_mains[:10000], label='Transfer main')
+                    # for i in range(len(self.transfer_submeters)):
+                    #     plt.plot(self.transfer_submeters[i][:10000], label='Transfer truth')
+                    # # plt.plot(pred_overall[clf][i], label='')
+                    # plt.title("Transfer")
+                    # plt.legend()
+                    # plt.show()
 
         appliance_readings = []
+        transfer_app_readings = []
         for i, appliance_name in enumerate(self.appliances):
             appliance_readings.append((appliance_name, [self.train_submeters[i]]))
+            if trans_d is not None:
+                transfer_app_readings.append((appliance_name, [self.transfer_submeters[i]]))
 
         self.train_mains = [self.train_mains]
         self.transfer_mains = [self.transfer_mains]
         self.train_submeters = appliance_readings
+        self.transfer_submeters = transfer_app_readings
         # print(type(self.train_mains), type(self.transfer_mains))
         if self.transfer_dataset_dict is not None:
             clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True,
-                            dst_main=self.transfer_mains)
+                            dst_main=self.transfer_mains, dst_appliances=self.transfer_submeters)
         else:
             clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True)
 

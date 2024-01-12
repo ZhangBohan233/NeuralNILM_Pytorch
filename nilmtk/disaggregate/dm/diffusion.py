@@ -259,13 +259,14 @@ class ConditionalDiffusion(nn.Module):
 
         return noise, noise_hat
 
-    def train_step_fixed(self, output, condition, t):
+    def train_step_fixed(self, output, condition, t, predefined_noise=None):
         # b, c, length = output.shape  # for 1d
         # device = output.device
 
         # input is the optional condition
         output_noisy, noise, noise_level = self.forward_process(
-            output, t, return_noise=True, rand_level=self.rand_level)
+            output, t,
+            return_noise=True, rand_level=self.rand_level, predefined_noise=predefined_noise)
 
         # print(output_noisy.shape, condition.shape)
 
@@ -274,6 +275,9 @@ class ConditionalDiffusion(nn.Module):
                                noise_level=noise_level.unsqueeze(-1), time=t)
 
         return noise, noise_hat
+
+    def freeze(self, freeze=True):
+        self.model.freeze(freeze)
 
     def p_loss(self, output, condition, return_pred=False):
         """
