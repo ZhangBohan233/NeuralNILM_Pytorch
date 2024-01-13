@@ -11,6 +11,8 @@ from .dm_pytorch import DM
 from .dm_sda_pytorch import DM_SDA
 from .dm_coral_pytorch import DMCoral
 from .dm_gated_pytorch import GatedDM
+from .gater_sgn_pytorch import GaterSGN
+from .dm_gated2_pytorch import DM_GATE2
 
 from .bilstm_pytorch_multidim import MUL_BiLSTM
 from .seq2point_pytorch_multidim import MUL_Seq2Point

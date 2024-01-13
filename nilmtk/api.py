@@ -51,6 +51,10 @@ class API():
             self.transfer_dataset_dict = params['transfer']['datasets']
         else:
             self.transfer_dataset_dict = None
+
+        self.gater = None
+        self.gater_method = params['gater'] if 'gater' in params else None
+
         self.test_datasets_dict = params['test']['datasets']
         self.metrics = params['test']['metrics']
         self.methods = params['methods']
@@ -62,8 +66,12 @@ class API():
         # Calls the Experiments with the specified parameters
 
         self.store_classifier_instances()
+        self.store_gater_instances()
         d = self.train_datasets_dict
         trans = self.transfer_dataset_dict
+
+        if self.gater is not None:
+            self.train_jointly(self.gater, d, trans)
 
         for model_name, clf in self.classifiers:
             # If the model is a neural net, it has an attribute n_epochs, Ex: DAE, Seq2Point
@@ -276,6 +284,17 @@ class API():
             new_appliances_list.append(app_df.loc[ix])
         return mains_df, new_appliances_list
 
+    def store_gater_instances(self):
+        if self.gater_method is not None:
+            try:
+                print(self.gater_method)
+                self.gater = self.gater_method
+
+            except Exception as e:
+                print("\n\nThe method {model_name} specied does not exist. \n\n".format(
+                    model_name=self.gater_method))
+                print(e)
+
     def store_classifier_instances(self):
         # This function is reponsible for initializing the models with the specified model parameters
         for name in self.methods:
@@ -291,11 +310,17 @@ class API():
 
     def call_predict(self, classifiers):
         # This functions computers the predictions on the self.test_mains using all the trained models and then compares different learn't models using the metrics specified        
+        pred_gate = None
+        if self.gater is not None:
+            gt_gate, pred_gate = self.predict(self.gater, self.test_mains, self.test_submeters,
+                                              self.sample_period, 'Europe/London')
+
         pred_overall = {}
         gt_overall = {}
         for name, clf in classifiers:
             gt_overall, pred_overall[name] = self.predict(clf, self.test_mains, self.test_submeters,
-                                                          self.sample_period, 'Europe/London')
+                                                          self.sample_period, 'Europe/London',
+                                                          pred_gate=pred_gate)
             path = "predict" + clf.MODEL_NAME + ".csv"
             pred_overall[name].to_csv(path)
         self.gt_overall = gt_overall
@@ -332,13 +357,16 @@ class API():
             self.errors.append(computed_metric)
             self.errors_keys.append(self.storing_key + "_" + metric)
 
-    def predict(self, clf, test_elec, test_submeters, sample_period, timezone):
+    def predict(self, clf, test_elec, test_submeters, sample_period, timezone, **kwargs):
         # Generates predictions on the test dataset using the specified classifier.        
         print("Generating predictions for :", clf.MODEL_NAME)
         # "ac_type" varies according to the dataset used. 
-        # Make sure to use the correct ac_type before using the default parameters in this code.   
+        # Make sure to use the correct ac_type before using the default parameters in this code.
 
-        pred_list = clf.disaggregate_chunk(test_elec)
+        if 'pred_gate' in kwargs and kwargs['pred_gate'] is not None:
+            pred_list = clf.disaggregate_chunk(test_elec, pred_gate=kwargs['pred_gate'])
+        else:
+            pred_list = clf.disaggregate_chunk(test_elec)
         concat_pred_df = pd.concat(pred_list, axis=0)
 
         gt = {}

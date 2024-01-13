@@ -1,4 +1,4 @@
-from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, recall_score, precision_score, matthews_corrcoef
+from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, recall_score, accuracy_score, precision_score, matthews_corrcoef
 import numpy as np
 on_threhold = {'fridge':50, 'kettle':2000, 'dish washer':10, 'washing machine':20, 'drill':0}
 
@@ -37,6 +37,15 @@ def precision(app_name,app_gt, app_pred):
     pred_temp = np.where(pred_temp<threshold,0,1)
 
     return precision_score(gt_temp, pred_temp)
+
+def accuracy(app_name,app_gt, app_pred):
+    threshold = on_threhold.get(app_name,10)
+    gt_temp = np.array(app_gt)
+    gt_temp = np.where(gt_temp<threshold,0,1)
+    pred_temp = np.array(app_pred)
+    pred_temp = np.where(pred_temp<threshold,0,1)
+
+    return accuracy_score(gt_temp, pred_temp)
 
 def f1score(app_name,app_gt, app_pred):
     threshold = on_threhold.get(app_name,10)
