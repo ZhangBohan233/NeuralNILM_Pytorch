@@ -113,9 +113,9 @@ e = {
     # Specify algorithm hyper-parameters
     'methods': {
         "DM_GATE2": DM_GATE2(
-            {'n_epochs': 50, 'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 1,
+            {'n_epochs': 50, 'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 10,
              'note': 'ukdale',
-             'test_only': False, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
+             'test_only': True, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
              "sampler": "ddim",
              "patience": 3,
              "app_meta": utils.APP_META["ukdale"], 'filter_train': False})

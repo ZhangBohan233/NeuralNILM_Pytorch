@@ -159,26 +159,36 @@ def train(appliance_name, model: ConditionalDiffusion,
     valid_mains = np.array(0)
     valid_appliance = np.array(0)
 
-    segments = 4
-    each_seg_len = mains.shape[0] // segments
+    segments = 10
+    each_seg_len = mains.shape[1] // segments
     for i in range(segments):
         index = i * each_seg_len
-        sep = int(each_seg_len * 0.8)
-        end = mains.shape[0] if i == segments - 1 else index + each_seg_len
-        tm = mains[index:sep]
-        ta = appliance[index:sep]
-        vm = mains[sep:end]
-        va = appliance[sep:end]
-        if i == 0:
-            train_mains = tm
-            train_appliance = ta
-            valid_mains = vm
-            valid_appliance = va
+        end = mains.shape[1] if i == segments - 1 else index + each_seg_len
+
+        # sometimes let train at front, sometimes not
+        if random.random() < 0.5:
+            sep = index + int(each_seg_len * 0.8)
+            tm = mains[:, index:sep]
+            ta = appliance[:, index:sep]
+            vm = mains[:, sep:end]
+            va = appliance[:, sep:end]
         else:
-            train_mains = np.append(train_mains, tm)
-            train_appliance = np.append(train_appliance, ta)
-            valid_mains = np.append(valid_mains, vm)
-            valid_appliance = np.append(valid_appliance, va)
+            sep = index + int(each_seg_len * 0.2)
+            vm = mains[:, index:sep]
+            va = appliance[:, index:sep]
+            tm = mains[:, sep:end]
+            ta = appliance[:, sep:end]
+        
+        if i == 0:
+            train_mains = tm.reshape(1, -1)
+            train_appliance = ta.reshape(1, -1)
+            valid_mains = vm.reshape(1, -1)
+            valid_appliance = va.reshape(1, -1)
+        else:
+            train_mains = np.concatenate([train_mains, tm], axis=1)
+            train_appliance = np.concatenate([train_appliance, ta], axis=1)
+            valid_mains = np.concatenate([valid_mains, vm], axis=1)
+            valid_appliance = np.concatenate([valid_appliance, va], axis=1)
 
     # sep = int(mains.shape[1] * 0.8)
     # train_mains = mains[:, :sep]
