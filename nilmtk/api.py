@@ -4,6 +4,7 @@ from nilmtk.losses import *
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
+import nilmtk.utils as utils
 
 all_type_power = ['active', 'apparent']
 
@@ -39,6 +40,10 @@ class API():
         self.errors_keys = []
         self.predictions_keys = []
         self.params = params
+        if 'app_meta' in params:
+            self.app_meta = params['app_meta']
+        else:
+            self.app_meta = utils.APP_META['ukdale']
         for elems in params['power']:
             self.power = params['power']
         self.sample_period = params['sample_rate']
@@ -107,7 +112,12 @@ class API():
                 train_df = next(
                     train.buildings[building].elec.mains().load(physical_quantity='power',
                                                                 ac_type=all_type_power,
-                                                                sample_period=self.sample_period))
+                                                                sample_period=self.sample_period,
+                                                                resample=True,
+                                                                resample_kwargs={
+                                                                    'fill_method': None}
+                                                                ))
+                train_df.ffill(axis=0, inplace=True, limit=30)
                 if 'active' in train_df['power']:
                     train_df['active'] = train_df['power']['active']
                 if 'apparent' in train_df['power']:
@@ -121,8 +131,13 @@ class API():
                 for appliance_name in self.appliances:
                     appliance_df = next(train.buildings[building].elec[appliance_name].load(
                         physical_quantity='power', ac_type=self.power['appliance'],
-                        sample_period=self.sample_period))
+                        sample_period=self.sample_period,
+                        resample=True,
+                        resample_kwargs={'fill_method': None}
+                    ))
+                    appliance_df.ffill(axis=0, inplace=True, limit=30)
                     # appliance_df = appliance_df[[list(appliance_df.columns)[0]]]
+                    # appliance_df.clip(upper=self.app_meta[appliance_name]["max"])
                     appliance_readings.append(appliance_df)
                 if self.DROP_ALL_NANS:
                     train_df, appliance_readings = self.dropna(train_df, appliance_readings)
@@ -151,7 +166,12 @@ class API():
                     transfer_df = next(
                         transfer.buildings[building].elec.mains().load(physical_quantity='power',
                                                                        ac_type=all_type_power,
-                                                                       sample_period=self.sample_period))
+                                                                       sample_period=self.sample_period,
+                                                                       resample=True,
+                                                                       resample_kwargs={
+                                                                           'fill_method': None}
+                                                                       ))
+                    transfer_df.ffill(axis=0, inplace=True, limit=30)
                     if 'active' in transfer_df['power']:
                         transfer_df['active'] = transfer_df['power']['active']
                     if 'apparent' in transfer_df['power']:
@@ -165,7 +185,12 @@ class API():
                     for appliance_name in self.appliances:
                         appliance_df = next(transfer.buildings[building].elec[appliance_name].load(
                             physical_quantity='power', ac_type=self.power['appliance'],
-                            sample_period=self.sample_period))
+                            sample_period=self.sample_period,
+                            resample=True,
+                            resample_kwargs={'fill_method': None}
+                        ))
+                        appliance_df.ffill(axis=0, inplace=True, limit=30)
+                        # appliance_df.clip(upper=self.app_meta[appliance_name]["max"])
                         # appliance_df = appliance_df[[list(appliance_df.columns)[0]]]
                         appliance_readings.append(appliance_df)
                     if self.DROP_ALL_NANS:
@@ -223,7 +248,11 @@ class API():
                 test_mains = next(
                     test.buildings[building].elec.mains().load(physical_quantity='power',
                                                                ac_type=all_type_power,
-                                                               sample_period=self.sample_period))
+                                                               sample_period=self.sample_period,
+                                                               resample=True,
+                                                               resample_kwargs={
+                                                                   'fill_method': None}))
+                test_mains.ffill(axis=0, inplace=True, limit=30)
                 if 'active' in test_mains['power']:
                     test_mains['active'] = test_mains['power']['active']
                 if 'apparent' in test_mains['power']:
@@ -246,8 +275,15 @@ class API():
                 for appliance in self.appliances:
                     test_df = next((test.buildings[building].elec[appliance].load(
                         physical_quantity='power', ac_type=self.power['appliance'],
-                        sample_period=self.sample_period)))
+                        sample_period=self.sample_period,
+                        resample=True,
+                        resample_kwargs={'fill_method': None}
+                    )))
+                    test_df.ffill(axis=0, inplace=True, limit=30)
+                    # test_df.clip(upper=self.app_meta[appliance]["max"])
                     appliance_readings.append(test_df)
+
+                # print(test_mains.head(50))
 
                 if self.DROP_ALL_NANS:
                     test_mains, appliance_readings = self.dropna(test_mains, appliance_readings)
@@ -273,6 +309,7 @@ class API():
 
         # The below steps are for making sure that data is consistent by doing intersection across appliances
         mains_df = mains_df.dropna()
+        # mains_df = mains_df.loc[(mains_df!=0).any(axis=1)]
         for i in range(len(appliance_dfs)):
             appliance_dfs[i] = appliance_dfs[i].dropna()
         ix = mains_df.index
@@ -316,16 +353,41 @@ class API():
                                               self.sample_period, 'Europe/London')
 
         pred_overall = {}
-        gt_overall = {}
+        gt_overall = pd.DataFrame()
+
+        mains_df = self.test_mains[0].copy()
+        ix = mains_df.index
+
         for name, clf in classifiers:
-            gt_overall, pred_overall[name] = self.predict(clf, self.test_mains, self.test_submeters,
-                                                          self.sample_period, 'Europe/London',
-                                                          pred_gate=pred_gate)
+            gt_overall, pred = self.predict(clf, self.test_mains, self.test_submeters,
+                                            self.sample_period, 'Europe/London',
+                                            pred_gate=pred_gate)
             path = "predict" + clf.MODEL_NAME + ".csv"
-            pred_overall[name].to_csv(path)
-        self.gt_overall = gt_overall
+            pred_overall[name] = pred
+            pred.to_csv(path)
+
+            ix = ix.intersection(pred.index)
+
+        ix = ix.intersection(gt_overall.index)
+
+        mains_df = mains_df.loc[ix]
+        self.gt_overall = gt_overall.loc[ix]
+        for k in pred_overall:
+            pred_overall[k] = pred_overall[k].loc[ix]
+
         self.pred_overall = pred_overall
         self.gt_overall.to_csv("truth.csv")
+
+        for clf_name in pred_overall:
+            general_df = pd.DataFrame({'mains': mains_df.iloc[:, 0].to_numpy()}, index=ix)
+            pred = pred_overall[clf_name]
+            for app in pred:
+                general_df[app + "_truth"] = gt_overall[app]
+                general_df[app + "_pred"] = pred[app]
+
+            path = f'./{"+".join([str(app) for app in pred])}-{clf_name}.csv'
+            general_df.to_csv(path)
+
         if gt_overall.size == 0:
             print("No samples found in ground truth")
             return None
@@ -339,6 +401,7 @@ class API():
                 plt.plot(pred_overall[clf][i], label=clf)
             plt.title(i)
             plt.legend()
+            plt.show()
 
         for metric in self.metrics:
             try:
@@ -380,11 +443,16 @@ class API():
         for app_name in concat_pred_df.columns:
             app_series_values = concat_pred_df[app_name].values.flatten()
             # Neural nets do extra padding sometimes, to fit, so get rid of extra predictions
-            length = len(gt_overall[app_name])
+            length = min(len(gt_overall), len(gt_overall[app_name]))
             app_series_values = app_series_values[:length]
+            if len(app_series_values) < length:
+                app_series_values = np.append(app_series_values,
+                                              np.zeros(length - len(app_series_values)))
+            index = gt_overall.index[:length]
             # print(app_series_values)
             # print(gt_overall[app_name])
-            pred[app_name] = pd.Series(app_series_values, index=gt_overall.index)
+            print("length", length, len(index), len(app_series_values))
+            pred[app_name] = pd.Series(app_series_values, index=index)
         pred_overall = pd.DataFrame(pred, dtype='float32')
         # print(pred_overall)
         return gt_overall, pred_overall

@@ -94,7 +94,7 @@ def initialize(layer):
 
 
 def train(appliance_name, model, mains, appliance, epochs, batch_size, threshold, pretrain,
-          checkpoint_interval=None, train_patience=3):
+          checkpoint_interval=None, train_patience=3, note=''):
     # Model configuration
     if USE_CUDA:
         model = model.cuda()
@@ -107,7 +107,7 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, threshold
                                                                                   random_state=random_seed)
 
     # Create optimizer, loss function, and dataloadr
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     loss_fn_reg = torch.nn.MSELoss()
     loss_fn_cla = torch.nn.BCELoss()
 
@@ -181,7 +181,7 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, threshold
             best_loss = loss_reg_sum / cnt
             patience = 0
             net_state_dict = model.state_dict()
-            path_state_dict = "./" + appliance_name + "_sgn_best_state_dict.pt"
+            path_state_dict = "./" + appliance_name + "_" + note + "_sgn_best_state_dict.pt"
             torch.save(net_state_dict, path_state_dict)
         else:
             patience = patience + 1
@@ -202,7 +202,7 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, threshold
             checkpoint = {"model_state_dict": model.state_dict(),
                           "optimizer_state_dict": optimizer.state_dict(),
                           "epoch": epoch}
-            path_checkpoint = "./" + appliance_name + "_sgn_checkpoint_{}_epoch.pt".format(epoch)
+            path_checkpoint = "./" + appliance_name + "_" + note + "_sgn_checkpoint_{}_epoch.pt".format(epoch)
             torch.save(checkpoint, path_checkpoint)
 
 
@@ -247,6 +247,8 @@ class SGN(Disaggregator):
         self.mains_std = params.get('mains_std', None)
         self.test_only = params.get('test_only', False)
         self.gate_only = params.get('gate_only', False)
+        self.note = params.get('note', '')
+        self.patience = params.get('patience', 3)
 
     def partial_fit(self, train_main, train_appliances, pretrain=False, do_preprocessing=True,
                     **load_kwargs):
@@ -279,16 +281,18 @@ class SGN(Disaggregator):
                 # Load pretrain dict or not
                 if pretrain is True:
                     self.models[appliance_name].load_state_dict(
-                        torch.load("./" + appliance_name + "_sgn_pre_state_dict.pt"))
+                        torch.load("./" + appliance_name + "_" + self.note + "_sgn_pre_state_dict.pt"))
 
             model = self.models[appliance_name]
             if not self.test_only:
                 train(appliance_name, model, train_main, power, self.n_epochs, self.batch_size,
-                      (10.0 - self.appliance_params[app_name]['mean']) /
-                      self.appliance_params[app_name]['std'], pretrain, checkpoint_interval=3)
+                      (15.0 - self.appliance_params[app_name]['mean']) /
+                      self.appliance_params[app_name]['std'], pretrain, checkpoint_interval=3,
+                      train_patience=self.patience,
+                      note=self.note)
             # Model test will be based on the best model
             self.models[appliance_name].load_state_dict(
-                torch.load("./" + appliance_name + "_sgn_best_state_dict.pt"))
+                torch.load("./" + appliance_name + "_" + self.note + "_sgn_best_state_dict.pt"))
 
     def disaggregate_chunk(self, test_main_list, model=None, do_preprocessing=True):
         # Disaggregate (test process)
@@ -322,7 +326,7 @@ class SGN(Disaggregator):
                 prediction = self.appliance_params[appliance]['mean'] + (
                             sum_arr * self.appliance_params[appliance]['std'])
                 if self.gate_only:
-                    thresh = 40
+                    thresh = 15
                     prediction = np.where(prediction > thresh, 1, 0)
 
                 valid_predictions = prediction.flatten()

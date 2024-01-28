@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from inspect import isfunction
 from einops import rearrange
+import torch.nn.functional as F
 
 
 def exists(x):
@@ -22,6 +23,35 @@ class Residual(nn.Module):
 
     def forward(self, x, *args, **kwargs):
         return self.fn(x, *args, **kwargs) + x
+
+
+class DiffusionEmbedding(nn.Module):
+    def __init__(self, pos_emb_scale, dim):
+        super().__init__()
+        self.scale = pos_emb_scale  # 50000
+        # self.dim = dim
+        half_dim = dim // 2
+        exponents = torch.arange(half_dim, dtype=torch.float32) / float(half_dim)
+        exponents = 1e-4 ** exponents
+        self.register_buffer('exponents', exponents)
+        # self.projection1 = nn.Linear(self.n_channels, self.out_channels)
+        # self.projection2 = nn.Linear(self.out_channels, self.out_channels)
+
+    # noise_level: [B]
+    def forward(self, noise_level):
+        # print(noise_level.shape, self.exponents.shape, self.exponents.unsqueeze(0).shape)
+        exponents = self.exponents.repeat((noise_level.shape[0], 1))
+        # print(noise_level.unsqueeze(-1).shape, exponents.shape)
+        # print(exponents)
+        x = noise_level.unsqueeze(-1) * exponents * self.scale
+        x = torch.cat([x.sin(), x.cos()], dim=-1)  # [B, self.dim]
+        # print(x.shape)
+        return x
+        # x = self.projection1(x)
+        # x = F.silu(x)
+        # x = self.projection2(x)
+        # x = F.silu(x)
+        # return x
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -161,21 +191,28 @@ class UNet1D(nn.Module):
 
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
+        print("Unet dims:", dims, in_out)
 
         if with_time_emb:
             time_dim = dim
-            self.time_mlp = nn.Sequential(
-                SinusoidalPosEmb(dim),
-                nn.Linear(dim, dim * 4),
-                nn.GELU(),
-                nn.Linear(dim * 4, dim)
-            )
             # self.time_mlp = nn.Sequential(
             #     SinusoidalPosEmb(dim),
             #     nn.Linear(dim, dim * 4),
-            #     nn.SiLU(),
-            #     nn.Linear(dim * 4, dim),
-            #     nn.SiLU()
+            #     nn.GELU(),
+            #     nn.Linear(dim * 4, dim)
+            # )
+            self.time_mlp = nn.Sequential(
+                DiffusionEmbedding(50000, dim),
+                nn.Linear(dim, dim * 4),
+                nn.SiLU(),
+                nn.Linear(dim * 4, dim),
+                nn.SiLU()
+            )
+            # self.time_mlp = nn.Sequential(
+            #     DiffusionEmbedding(50000, dim),
+            #     nn.Linear(dim, dim * 4),
+            #     nn.GELU(),
+            #     nn.Linear(dim * 4, dim)
             # )
         else:
             time_dim = None

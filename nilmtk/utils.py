@@ -9,10 +9,79 @@ import warnings
 import numpy as np
 import pandas as pd
 import networkx as nx
+import torch
 from IPython.core.display import HTML, display
 from sklearn.metrics import mean_squared_error
 
 from nilmtk.datastore import HDFDataStore, CSVDataStore
+
+
+APP_META = {
+    "ukdale": {
+        "mains": {
+            "on": 0, "max": 6000
+        },
+        "kettle": {
+            "on": 2000, "max": 3100, "min_on": 12, "min_off": 0, "standby": 1.011
+        },
+        "fridge": {
+            "on": 50, "max": 300, "min_on": 60, "min_off": 12, "standby": 10.146
+        },
+        "washing machine": {
+            "on": 40, "max": 2500, "min_on": 1800, "min_off": 160, "standby": 3.001
+        },
+        "microwave": {
+            "on": 200, "max": 3000, "min_on": 12, "min_off": 30, "standby": 0.368
+        },
+        "dish washer": {
+            "on": 50, "max": 2500, "min_on": 1800, "min_off": 1800, "standby": 0.882
+        }
+    },
+    "refit": {
+        "mains": {
+            "on": 0, "max": 6000
+        },
+        "kettle": {
+            "on": 2000, "max": 3100, "min_on": 12, "min_off": 0
+        },
+        "fridge": {
+            "on": 50, "max": 300, "min_on": 60, "min_off": 12
+        },
+        "washing machine": {
+            "on": 40, "max": 2500, "min_on": 1800, "min_off": 160
+        },
+        "microwave": {
+            "on": 200, "max": 3000, "min_on": 12, "min_off": 30
+        },
+        "dish washer": {
+            "on": 50, "max": 2500, "min_on": 1800, "min_off": 1800
+        }
+    },
+    "redd": {
+        "mains": {
+            "on": 0, "max": 6000
+        },
+        "fridge": {
+            "on": 50, "max": 400, "min_on": 60, "min_off": 12
+        },
+        "washer dryer": {
+            "on": 20, "max": 500,
+            "min_on": 1800, "min_off": 160
+        },
+        "microwave": {
+            "on": 200, "max": 1800, "min_on": 12, "min_off": 30
+        },
+        "dish washer": {
+            "on": 10, "max": 1200, "min_on": 1800, "min_off": 1800
+        }
+    }
+}
+
+
+@torch.jit.script
+def lognorm(target, pred):
+    return (target - pred).abs().mean(dim=-1).clamp(min=1e-20).log().mean()
+
 
 def show_versions():
     """Prints versions of various dependencies"""

@@ -420,6 +420,7 @@ class ElecMeter(Hashable, Electric):
             resample_kwargs = kwargs.setdefault('resample_kwargs', {})
             resample_kwargs.setdefault('fill_method', 'ffill')
             resample_kwargs.setdefault('how', 'mean')
+            print(resample_kwargs)
             if 'limit' not in resample_kwargs:
                 default_sample_period = self.sample_period()
                 sample_period = kwargs.get('sample_period', default_sample_period)

@@ -1,0 +1,24 @@
+#！ /bin/bash
+# Create indexes
+#PBS -P RDS-FEI-AML_NILM-RW
+#PBS -N GT-NILM-TRAIN-1
+#PBS -l select=1:ncpus=1:mem=16GB:ngpus=1
+#PBS -l walltime=23:59:59
+#PBS -M bzha2304@uni.sydney.edu.au
+#PBS -m abe
+#PBS -q defaultQ
+
+# Load modules
+module load python3
+
+path=/project/RDS-FEI-AML_NILM-RW/gt-nilm
+
+# Index
+module load python/3.9.15
+python -m venv myenv
+source myenv/bin/activate
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip3 install numpy matplotlib
+python ${path}/train.py
+
+

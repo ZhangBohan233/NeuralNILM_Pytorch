@@ -592,6 +592,7 @@ class DM_SDA(Disaggregator):
         self.lr = params.get('lr', 5e-6 if self.fine_tune else 3e-5)
         self.sampler_class = params.get("sampler", "ddpm")
         self.src_rate = params.get("src_rate", 1.0)
+        self.gpu_dataset = params.get("gpu_dataset", False)
 
     def partial_fit(self, train_main, train_appliances, pretrain=False, do_preprocessing=True,
                     pretrain_path="./dm_sda_pre_state_dict.pkl", **load_kwargs):
@@ -686,7 +687,7 @@ class DM_SDA(Disaggregator):
             model = self.models[appliance_name]
             if not self.test_only:
                 train(appliance_name, model, train_main, power, self.n_epochs, self.batch_size,
-                      pretrain, checkpoint_interval=3, lr=self.lr)
+                      pretrain, checkpoint_interval=3, lr=self.lr, gpu_dataset=self.gpu_dataset)
                 # Model test will be based on the best model
             ckpt_name = "./" + appliance_name + "_dm_best_state_dict.pt"
             # ckpt_name = "./fridge_dm_checkpoint_26_epoch.pt"
@@ -719,7 +720,8 @@ class DM_SDA(Disaggregator):
                           src_rate=self.src_rate,
                           checkpoint_interval=3,
                           train_patience=5,
-                          lr=self.lr)
+                          lr=self.lr,
+                          gpu_dataset=self.gpu_dataset)
 
                 ckpt_name = "./" + appliance_name + "_dm_ft_best_state_dict.pt"
                 # ckpt_name = "./fridge_dm_checkpoint_26_epoch.pt"
