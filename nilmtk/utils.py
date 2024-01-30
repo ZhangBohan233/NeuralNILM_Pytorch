@@ -64,6 +64,10 @@ APP_META = {
         "fridge": {
             "on": 50, "max": 400, "min_on": 60, "min_off": 12
         },
+        "washing machine": {
+            "on": 20, "max": 500,
+            "min_on": 1800, "min_off": 160
+        },
         "washer dryer": {
             "on": 20, "max": 500,
             "min_on": 1800, "min_off": 160

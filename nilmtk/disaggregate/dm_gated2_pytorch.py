@@ -109,6 +109,46 @@ def initialize(layer):
             torch.nn.init.constant_(layer.bias.data, val=0.0)
 
 
+def shuffle_train_val(mains, appliances, val_rate=0.2, segments=16):
+    train_mains = np.array(0)
+    train_appliance = np.array(0)
+    valid_mains = np.array(0)
+    valid_appliance = np.array(0)
+
+    each_seg_len = mains.shape[1] // segments
+    for i in range(segments):
+        index = i * each_seg_len
+        end = mains.shape[1] if i == segments - 1 else index + each_seg_len
+
+        # sometimes let train at front, sometimes not
+        minor_sep = int(1 / val_rate)
+        minor_len = each_seg_len // minor_sep
+        minor_idx = random.randint(0, minor_sep - 1)
+        val_b = index + minor_idx * minor_len
+        val_e = val_b + minor_len
+        if minor_idx == minor_sep - 1:
+            val_e = end
+
+        tm = np.concatenate([mains[:, index:val_b], mains[:, val_e:end]], axis=1)
+        ta = np.concatenate([appliances[:, index:val_b], appliances[:, val_e:end]], axis=1)
+
+        vm = mains[:, val_b:val_e]
+        va = appliances[:, val_b:val_e]
+
+        if i == 0:
+            train_mains = tm.reshape(1, -1)
+            train_appliance = ta.reshape(1, -1)
+            valid_mains = vm.reshape(1, -1)
+            valid_appliance = va.reshape(1, -1)
+        else:
+            train_mains = np.concatenate([train_mains, tm], axis=1)
+            train_appliance = np.concatenate([train_appliance, ta], axis=1)
+            valid_mains = np.concatenate([valid_mains, vm], axis=1)
+            valid_appliance = np.concatenate([valid_appliance, va], axis=1)
+
+    return train_mains, train_appliance, valid_mains, valid_appliance
+
+
 def train(appliance_name, model: ConditionalDiffusion,
           mains, appliance, sequence_length, epochs, batch_size, threshold, pretrain,
           checkpoint_interval=None, train_patience=5, lr=3e-5, gpu_dataset=True,
@@ -154,52 +194,36 @@ def train(appliance_name, model: ConditionalDiffusion,
     mains = mains.reshape(1, -1)
     appliance = appliance.reshape(1, -1)
 
-    train_mains = np.array(0)
-    train_appliance = np.array(0)
-    valid_mains = np.array(0)
-    valid_appliance = np.array(0)
+    train_mains, train_appliance, valid_mains, valid_appliance = \
+        shuffle_train_val(mains,
+                          appliance,
+                          segments=16 if mains.shape[1] > 1000000 else 8)
 
-    segments = 10
-    each_seg_len = mains.shape[1] // segments
-    for i in range(segments):
-        index = i * each_seg_len
-        end = mains.shape[1] if i == segments - 1 else index + each_seg_len
+    train_dataset = GpuDataset(sequence_length,
+                               torch.from_numpy(train_mains).float(),
+                               torch.from_numpy(train_appliance).float(),
+                               stride=stride,
+                               gpu=gpu_dataset)
 
-        # sometimes let train at front, sometimes not
-        if random.random() < 0.5:
-            sep = index + int(each_seg_len * 0.8)
-            tm = mains[:, index:sep]
-            ta = appliance[:, index:sep]
-            vm = mains[:, sep:end]
-            va = appliance[:, sep:end]
-        else:
-            sep = index + int(each_seg_len * 0.2)
-            vm = mains[:, index:sep]
-            va = appliance[:, index:sep]
-            tm = mains[:, sep:end]
-            ta = appliance[:, sep:end]
-        
-        if i == 0:
-            train_mains = tm.reshape(1, -1)
-            train_appliance = ta.reshape(1, -1)
-            valid_mains = vm.reshape(1, -1)
-            valid_appliance = va.reshape(1, -1)
-        else:
-            train_mains = np.concatenate([train_mains, tm], axis=1)
-            train_appliance = np.concatenate([train_appliance, ta], axis=1)
-            valid_mains = np.concatenate([valid_mains, vm], axis=1)
-            valid_appliance = np.concatenate([valid_appliance, va], axis=1)
+    train_loader = tud.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                  num_workers=0,
+                                  drop_last=True)
 
-    # sep = int(mains.shape[1] * 0.8)
-    # train_mains = mains[:, :sep]
-    # train_appliance = appliance[:, :sep]
-    # valid_mains = mains[:, sep:]
-    # valid_appliance = appliance[:, sep:]
+    valid_dataset = GpuDataset(sequence_length,
+                               torch.from_numpy(valid_mains).float(),
+                               torch.from_numpy(valid_appliance).float(),
+                               stride=stride,
+                               gpu=gpu_dataset)
 
-    # Split the train and validation set
-    # train_mains, valid_mains, train_appliance, valid_appliance = train_test_split(mains, appliance,
-    #                                                                               test_size=.2,
-    #                                                                               random_state=random_seed)
+    valid_loader = tud.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,
+                                  num_workers=0,
+                                  drop_last=True)
+
+    n_batches = len(train_loader)
+    n_val_batches = len(valid_loader)
+
+    print("Seq len", sequence_length, "stride", stride, "Train len", len(train_dataset),
+          "Train batches", len(train_loader), "Val batches", len(valid_loader))
 
     # Create optimizer, loss function, and dataloader
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
@@ -209,36 +233,13 @@ def train(appliance_name, model: ConditionalDiffusion,
     loss_fn = torch.nn.MSELoss(reduction='mean')
     # loss_fn = utils.lognorm
 
-    train_dataset = GpuDataset(sequence_length,
-                               torch.from_numpy(train_mains).float(),
-                               torch.from_numpy(train_appliance).float(),
-                               stride=stride,
-                               gpu=gpu_dataset)
-
-    train_loader = tud.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
-                                  drop_last=True)
-
-    valid_dataset = GpuDataset(sequence_length,
-                               torch.from_numpy(valid_mains).float(),
-                               torch.from_numpy(valid_appliance).float(),
-                               stride=stride,
-                               gpu=gpu_dataset)
-
-    valid_loader = tud.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
-                                  drop_last=True)
-
     # raise RuntimeError
-
-    print("Seq len", sequence_length, "stride", stride, "Train len", len(train_dataset),
-          "Train batches", len(train_loader))
 
     writer = SummaryWriter(comment='train_visual')
     patience, best_loss = 0, None
 
     # plt.subplots(4, 4)
     plt_x = np.arange(sequence_length)
-    n_batches = len(train_loader)
-    n_val_batches = len(valid_loader)
 
     losses = []
 
@@ -249,6 +250,7 @@ def train(appliance_name, model: ConditionalDiffusion,
                 train_patience))
             break
             # Train the model
+
         st = time.time()
         model.train()
 
@@ -415,6 +417,8 @@ def test(model, sequence_length, test_mains, batch_size=512, gpu_dataset=False, 
                               random_shift=False)
     test_loader = tud.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
+    model.model.draw_attn = True
+
     with torch.no_grad():
         for i, batch_mains in enumerate(test_loader):
             if USE_CUDA and not gpu_dataset:
@@ -433,6 +437,9 @@ def test(model, sequence_length, test_mains, batch_size=512, gpu_dataset=False, 
                     plt.plot(batch_mains[j].reshape(-1).detach().cpu().numpy())
                     plt.plot(batch_pred[j].reshape(-1).detach().cpu().numpy())
                 plt.show()
+
+            if i >= 16:
+                model.model.draw_attn = False
 
             # batch_index += batch_pred.shape[0]
     ed = time.time()

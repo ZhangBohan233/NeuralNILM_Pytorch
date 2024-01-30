@@ -4,6 +4,8 @@ import torch.nn as nn
 from inspect import isfunction
 from einops import rearrange
 import torch.nn.functional as F
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 def exists(x):
@@ -22,7 +24,13 @@ class Residual(nn.Module):
         self.fn = fn
 
     def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x
+        fnx = self.fn(x, *args, **kwargs)
+        if isinstance(fnx, tuple):
+            return fnx[0] + x, *fnx[1:]
+        elif isinstance(fnx, torch.Tensor):
+            return fnx + x
+        else:
+            raise TypeError
 
 
 class DiffusionEmbedding(nn.Module):
@@ -160,12 +168,57 @@ class LinearAttention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x -> b h c (x)', h=self.heads), qkv)
         q = q * self.scale
 
+        kb = k
         k = k.softmax(dim=-1)
+        # print("k shape", k.shape)
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
-
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
+
         out = rearrange(out, 'b h c (x) -> b (h c) x', h=self.heads, x=length)
-        return self.to_out(out)
+        return self.to_out(out), (q, kb)
+
+
+class LinearAttention2(nn.Module):
+    def __init__(self, dim, heads=4, dim_head=32):
+        super().__init__()
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        self.to_qkv = nn.Conv1d(dim, hidden_dim * 3, 1, bias=False)
+        self.to_out = nn.Conv1d(hidden_dim, dim, 1)
+
+    def forward(self, x):
+        b, c, length = x.shape
+        qkv = self.to_qkv(x).chunk(3, dim=1)
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) x -> b h c (x)', h=self.heads), qkv)
+        q = q * self.scale
+
+        attn_scores = torch.einsum('b h l d, b h n d -> b h l n', q, k)
+        weights = torch.softmax(attn_scores, dim=-1)
+        out = torch.einsum('b h i j, b h j d -> b h i d', weights, v)
+        out = rearrange(out, 'b h c (x) -> b (h c) x', h=self.heads, x=length)
+        return self.to_out(out), weights
+
+
+def visualize_attention_weights(qk, title="Attention weights"):
+    q, k = qk
+    attn_scores = torch.einsum('b h l d, b h n d -> b h l n', q, k)
+    # weights = attn_scores
+    weights = F.softmax(attn_scores, dim=-1)
+
+    num_heads = weights.shape[1]
+
+    attn_weights = weights.detach().cpu().numpy()  # Convert to numpy for visualization
+
+    # Assuming we visualize the first head and first example
+    fig, axs = plt.subplots(1, num_heads, figsize=(20, 5))
+    for i in range(num_heads):
+        sns.heatmap(attn_weights[0, i], ax=axs[i], cmap='viridis')
+        axs[i].set_title(f'Head {i}')
+        axs[i].set_xlabel('Key')
+        axs[i].set_ylabel('Query')
+    plt.tight_layout()
+    plt.show()
 
 
 # Main Model
@@ -188,6 +241,7 @@ class UNet1D(nn.Module):
         print("Is Time embed used ? ", with_time_emb)
         self.output_mean_scale = output_mean_scale
         self.sequence_length = sequence_length
+        self.draw_attn = False
 
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -298,12 +352,15 @@ class UNet1D(nn.Module):
         for convnext, convnext2, attn, downsample in self.downs:
             x = convnext(x, t)
             x = convnext2(x, t)
-            x = attn(x)
+            x, _ = attn(x)
             h.append(x)
             x = downsample(x)
 
         x = self.mid_block1(x, t)
-        x = self.mid_attn(x)
+        x, qk = self.mid_attn(x)
+        if self.draw_attn:
+            visualize_attention_weights(qk, "weights")
+        # visualize_attention_weights(x, "conved")
         x = self.mid_block2(x, t)
 
         for convnext, convnext2, attn, upsample in self.ups:
@@ -311,7 +368,7 @@ class UNet1D(nn.Module):
             x = torch.cat((x, h.pop()), dim=1)
             x = convnext(x, t)
             x = convnext2(x, t)
-            x = attn(x)
+            x, _ = attn(x)
             x = upsample(x)
         if self.residual:
             return self.final_conv(x) + orig_x

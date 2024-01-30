@@ -301,7 +301,7 @@ class API():
                     self.test_submeters.append((appliance_name, [appliance_readings[i]]))
 
                 self.storing_key = str(dataset) + "_" + str(building)
-                self.call_predict(self.classifiers)
+                self.call_predict(self.classifiers, dataset)
 
     def dropna(self, mains_df, appliance_dfs):
         # Drop missing value
@@ -345,7 +345,7 @@ class API():
                     model_name=name))
                 print(e)
 
-    def call_predict(self, classifiers):
+    def call_predict(self, classifiers, dataset):
         # This functions computers the predictions on the self.test_mains using all the trained models and then compares different learn't models using the metrics specified        
         pred_gate = None
         if self.gater is not None:
@@ -385,7 +385,7 @@ class API():
                 general_df[app + "_truth"] = gt_overall[app]
                 general_df[app + "_pred"] = pred[app]
 
-            path = f'./{"+".join([str(app) for app in pred])}-{clf_name}.csv'
+            path = f'./{dataset}-{"+".join([str(app) for app in pred])}-{clf_name}.csv'
             general_df.to_csv(path)
 
         if gt_overall.size == 0:

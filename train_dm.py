@@ -39,10 +39,10 @@ REDD_TRAIN_STD = {
             'start_time': '2011-04-19',
             'end_time': '2011-05-30'
         },
-        # 6: {
-        #     'start_time': '2011-05-22',
-        #     'end_time': '2011-06-13'
-        # },
+        6: {
+            'start_time': '2011-05-22',
+            'end_time': '2011-06-13'
+        },
     }
 
 }
@@ -96,35 +96,43 @@ UKDALE_TEST_STD = {
     },
 }
 
+USING_DATASET = 'redd'
+
 e = {
     # Specify power type, sample rate and disaggregated appliance
     'power': {
-        'mains': ['active'],
+        # 'mains': ['active'],
         # 'appliance': ['active']
-        # 'mains': ['apparent'],  # problem: ukdale active, redd apparent
+        'mains': ['apparent'],  # problem: ukdale active, redd apparent
         'appliance': ['active']
     },
     'sample_rate': 6,
-    # 'appliances': ['fridge'],
-    'app_meta': utils.APP_META["ukdale"],
-    'appliances': ['dish washer'],
+    # 'appliances': ['dish washer'],
+    'app_meta': utils.APP_META[USING_DATASET],
+    'appliances': ['fridge'],
     # Universally no pre-training
     'pre_trained': False,
     # Specify algorithm hyper-parameters
     'methods': {
         "DM_GATE2": DM_GATE2(
-            {'n_epochs': 50, 'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 10,
-             'note': 'ukdale',
-             'test_only': True, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
+            {'n_epochs': 200 if USING_DATASET == "redd" else 50,
+             'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 10,
+             'note': USING_DATASET,
+             'test_only': False, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
              "sampler": "ddim",
-             "patience": 3,
-             "app_meta": utils.APP_META["ukdale"], 'filter_train': False})
+             'patience': 5 if USING_DATASET == "redd" else 3,
+             "app_meta": utils.APP_META[USING_DATASET], 'filter_train': False}),
+        # "SGN": SGN(
+        #     {'n_epochs': 50 if USING_DATASET == "redd" else 10, 'batch_size': 256,
+        #      'test_only': False, 'gate_only': False,
+        #      'patience': 5 if USING_DATASET == "redd" else 3, 'note': USING_DATASET}
+        # )
     },
     # Specify train and test data
     'train': {
         'datasets': {
-            # 'redd': REDD_TRAIN_STD
-            'ukdale': UKDALE_TRAIN_STD
+            'redd': REDD_TRAIN_STD
+            # 'ukdale': UKDALE_TRAIN_STD
         }
     },
     # 'transfer': {
@@ -164,8 +172,8 @@ e = {
             #         }
             #     }
             #   },
-            # 'redd': REDD_TEST_STD
-            'ukdale': UKDALE_TEST_STD
+            'redd': REDD_TEST_STD,
+            # 'ukdale': UKDALE_TEST_STD
         },
         # Specify evaluation metrics
         'metrics': ['accuracy', 'mae', 'f1score', 'recall', 'precision', 'nep', 'MCC']

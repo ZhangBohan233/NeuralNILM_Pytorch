@@ -206,8 +206,8 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, threshold
             torch.save(checkpoint, path_checkpoint)
 
 
-def test(model, test_mains, batch_size=512):
-    if USE_CUDA:
+def test(model, test_mains, batch_size=512, gpu_test=True):
+    if USE_CUDA and gpu_test:
         model = model.cuda()
 
     # Model test
@@ -219,7 +219,7 @@ def test(model, test_mains, batch_size=512):
     test_loader = tud.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     with torch.no_grad():
         for i, batch_mains in enumerate(test_loader):
-            if USE_CUDA:
+            if USE_CUDA and gpu_test:
                 batch_mains[0] = batch_mains[0].cuda()
             batch_pred = model(batch_mains[0])[0]
             batch_pred = batch_pred.detach().cpu()
@@ -306,9 +306,9 @@ class SGN(Disaggregator):
             test_main = test_mains_df.values.reshape((-1, self.mains_length, 1))
             for appliance in self.models:
                 # Move the model to cpu, and then test it
-                model = self.models[appliance]
-                # model = self.models[appliance].to('cpu')
-                predict = test(model, test_main)
+                # model = self.models[appliance]
+                model = self.models[appliance].to('cpu')
+                predict = test(model, test_main, gpu_test=False)
 
                 l1 = self.mains_length
                 l2 = self.appliance_length
