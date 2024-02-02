@@ -63,7 +63,8 @@ class ConditionalDiffusion(nn.Module):
     def forward(self,
                 condition,
                 sampler=None,
-                verbose=False
+                verbose=False,
+                plot=False
                 ):
         """
             forward() function triggers a complete inference cycle
@@ -105,6 +106,9 @@ class ConditionalDiffusion(nn.Module):
             ys = [y_t]
             # t = start_step - 1
             for i in tqdm(it, desc='diffusion sampling', total=num_timesteps) if verbose else it:
+                if plot and i == 0:
+                    sampler.model.draw_attn = True
+
                 t = torch.full((b,), i, device=device, dtype=torch.long)
                 y_t = sampler.compute_inverse_dynamincs(y_t, condition, i, t)
                 ys.append(y_t)

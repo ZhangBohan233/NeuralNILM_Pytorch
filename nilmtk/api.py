@@ -57,6 +57,14 @@ class API():
         else:
             self.transfer_dataset_dict = None
 
+        if 'save' in params:
+            self.save = params['save']
+        else:
+            self.save = True
+        if 'save_note' in params:
+            self.save_note = params['save_note']
+        else:
+            self.save_note = None
         self.gater = None
         self.gater_method = params['gater'] if 'gater' in params else None
 
@@ -125,7 +133,7 @@ class API():
                 # train_df['reactive'] = np.sqrt(
                 #     train_df['power']['apparent'] ** 2 - train_df['power']['active'] ** 2)
                 train_df.drop(['power'], axis=1, inplace=True)
-                train_df = train_df[self.power['mains']]
+                train_df = train_df[self.power['mains_train']]
 
                 appliance_readings = []
                 for appliance_name in self.appliances:
@@ -179,7 +187,7 @@ class API():
                     # train_df['reactive'] = np.sqrt(
                     #     train_df['power']['apparent'] ** 2 - train_df['power']['active'] ** 2)
                     transfer_df.drop(['power'], axis=1, inplace=True)
-                    transfer_df = transfer_df[self.power['mains']]
+                    transfer_df = transfer_df[self.power['mains_transfer']]
 
                     appliance_readings = []
                     for appliance_name in self.appliances:
@@ -260,7 +268,7 @@ class API():
                 # test_mains['reactive'] = np.sqrt(
                 #     test_mains['power']['apparent'] ** 2 - test_mains['power']['active'] ** 2)
                 test_mains.drop(['power'], axis=1, inplace=True)
-                test_mains = test_mains[self.power['mains']]
+                test_mains = test_mains[self.power['mains_test']]
                 '''
                 train_df = next(train.buildings[building].elec.mains().load(physical_quantity='power', ac_type= all_type_power,sample_period = self.sample_period))
                 train_df['active'] = train_df['power']['active']
@@ -367,6 +375,8 @@ class API():
             pred.to_csv(path)
 
             ix = ix.intersection(pred.index)
+            if pred_gate is not None:
+                ix = ix.intersection(pred_gate.index)
 
         ix = ix.intersection(gt_overall.index)
 
@@ -375,6 +385,9 @@ class API():
         for k in pred_overall:
             pred_overall[k] = pred_overall[k].loc[ix]
 
+        if pred_gate is not None:
+            pred_gate = pred_gate.loc[ix]
+
         self.pred_overall = pred_overall
         self.gt_overall.to_csv("truth.csv")
 
@@ -382,11 +395,27 @@ class API():
             general_df = pd.DataFrame({'mains': mains_df.iloc[:, 0].to_numpy()}, index=ix)
             pred = pred_overall[clf_name]
             for app in pred:
-                general_df[app + "_truth"] = gt_overall[app]
-                general_df[app + "_pred"] = pred[app]
+                app_pred = pred[app]
+                if pred_gate is not None:
+                    app_gate = pred_gate[app]
 
-            path = f'./{dataset}-{"+".join([str(app) for app in pred])}-{clf_name}.csv'
-            general_df.to_csv(path)
+                    general_df[app + "_ungated"] = app_pred
+                    general_df[app + "_gate"] = app_gate
+
+                    plt.plot(app_pred, label=app)
+                    plt.plot(app_gate * 1000, label="gate")
+                    plt.show()
+
+                    app_pred *= app_gate
+
+                general_df[app + "_truth"] = gt_overall[app]
+                general_df[app + "_pred"] = app_pred
+
+            path = f'{dataset}-{"+".join([str(app) for app in pred])}-{clf_name}.csv'
+            if self.save_note is not None:
+                path = self.save_note + "-" + path
+            if self.save:
+                general_df.to_csv("./" + path)
 
         if gt_overall.size == 0:
             print("No samples found in ground truth")

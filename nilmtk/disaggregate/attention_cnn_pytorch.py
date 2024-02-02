@@ -116,7 +116,7 @@ def initialize(layer):
 
 
 def train(appliance_name, model, mains, appliance, epochs, batch_size, pretrain=False, checkpoint_interval=None,
-          train_patience=3):
+          train_patience=3, note=''):
     # Model configuration
     if USE_CUDA:
         model = model.cuda()
@@ -184,7 +184,7 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, pretrain=
             best_loss = final_loss
             patience = 0
             net_state_dict = model.state_dict()
-            path_state_dict = "./" + appliance_name + "_AttentionCNN_best_state_dict.pt"
+            path_state_dict = "./" + appliance_name + "_" + note + "_AttentionCNN_best_state_dict.pt"
             torch.save(net_state_dict, path_state_dict)
         else:
             patience = patience + 1
@@ -202,7 +202,7 @@ def train(appliance_name, model, mains, appliance, epochs, batch_size, pretrain=
             checkpoint = {"model_state_dict": model.state_dict(),
                           "optimizer_state_dict": optimizer.state_dict(),
                           "epoch": epoch}
-            path_checkpoint = "./" + appliance_name + "_AttentionCNN_{}_epoch.pkl".format(epoch)
+            path_checkpoint = "./" + appliance_name + "_" + note + "_AttentionCNN_{}_epoch.pkl".format(epoch)
             torch.save(checkpoint, path_checkpoint)
 
 
@@ -238,6 +238,8 @@ class AttentionCNN(Disaggregator):
         self.appliance_params = params.get('appliance_params', {})
         self.mains_mean = params.get('mains_mean', None)
         self.mains_std = params.get('mains_std', None)
+        self.patience = params.get('patience')
+        self.note = params.get('note', '')
         if self.sequence_length % 2 == 0:
             print("Sequence length should be odd!")
             raise (SequenceLengthError)
@@ -272,14 +274,15 @@ class AttentionCNN(Disaggregator):
                 # Load pretrain dict or not
                 if pretrain is True:
                     self.models[appliance_name].load_state_dict(
-                        torch.load("./" + appliance_name + "_AttentionCNN_pre_state_dict.pt"))
+                        torch.load("./" + appliance_name + "_" + self.note + "_AttentionCNN_pre_state_dict.pt"))
 
             model = self.models[appliance_name]
-            train(appliance_name, model, train_main, power, self.n_epochs, self.batch_size, pretrain,
-                  checkpoint_interval=3)
+            train(appliance_name, model, train_main, power, self.n_epochs, self.batch_size,
+                  pretrain,
+                  train_patience=self.patience, checkpoint_interval=3, note=self.note)
             # Model test will be based on the best model
             self.models[appliance_name].load_state_dict(
-                torch.load("./" + appliance_name + "_AttentionCNN_best_state_dict.pt"))
+                torch.load("./" + appliance_name + "_" + self.note + "_AttentionCNN_best_state_dict.pt"))
 
     def disaggregate_chunk(self, test_main_list, model=None, do_preprocessing=True):
         # Disaggregate (test process)

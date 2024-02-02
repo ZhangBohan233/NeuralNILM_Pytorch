@@ -13,7 +13,6 @@ print(torch.__version__, device)
 
 torch.set_float32_matmul_precision('high')
 
-
 REDD_AVAIL = {
     'fridge': [1, 2, 3, 5, 6],
     'washing machine': [1, 2, 3, 4, 5, 6],
@@ -39,10 +38,10 @@ REDD_TRAIN_STD = {
             'start_time': '2011-04-19',
             'end_time': '2011-05-30'
         },
-        6: {
-            'start_time': '2011-05-22',
-            'end_time': '2011-06-13'
-        },
+        # 6: {
+        #     'start_time': '2011-05-22',
+        #     'end_time': '2011-06-13'
+        # },
     }
 
 }
@@ -101,32 +100,36 @@ USING_DATASET = 'redd'
 e = {
     # Specify power type, sample rate and disaggregated appliance
     'power': {
-        # 'mains': ['active'],
-        # 'appliance': ['active']
-        'mains': ['apparent'],  # problem: ukdale active, redd apparent
+        # 'mains_train': ['active'],  # problem: ukdale active, redd apparent
+        # 'mains_test': ['active'],
+        'mains_train': ['apparent'],  # problem: ukdale active, redd apparent
+        'mains_test': ['apparent'],
         'appliance': ['active']
     },
-    'sample_rate': 6,
+    'sample_rate': 3,
     # 'appliances': ['dish washer'],
     'app_meta': utils.APP_META[USING_DATASET],
-    'appliances': ['fridge'],
+    'appliances': ['microwave'],
     # Universally no pre-training
     'pre_trained': False,
     # Specify algorithm hyper-parameters
+    'save_note': 'gated',
+    'gater': SGN(
+        {'n_epochs': 0, 'batch_size': 256,
+         'sequence_length': 400, 'appliance_length': 64,
+         'test_only': True, 'gate_only': True,
+         'note': USING_DATASET}),
     'methods': {
         "DM_GATE2": DM_GATE2(
-            {'n_epochs': 200 if USING_DATASET == "redd" else 50,
+            {'n_epochs': 400 if USING_DATASET == "redd" else 100,
              'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 10,
              'note': USING_DATASET,
              'test_only': False, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
              "sampler": "ddim",
              'patience': 5 if USING_DATASET == "redd" else 3,
-             "app_meta": utils.APP_META[USING_DATASET], 'filter_train': False}),
-        # "SGN": SGN(
-        #     {'n_epochs': 50 if USING_DATASET == "redd" else 10, 'batch_size': 256,
-        #      'test_only': False, 'gate_only': False,
-        #      'patience': 5 if USING_DATASET == "redd" else 3, 'note': USING_DATASET}
-        # )
+             "app_meta": utils.APP_META[USING_DATASET], 'filter_train': True
+             }
+        )
     },
     # Specify train and test data
     'train': {
@@ -176,7 +179,7 @@ e = {
             # 'ukdale': UKDALE_TEST_STD
         },
         # Specify evaluation metrics
-        'metrics': ['accuracy', 'mae', 'f1score', 'recall', 'precision', 'nep', 'MCC']
+        'metrics': ['accuracy', 'f1score', 'mae', 'sae', 'precision', 'recall', 'nep', 'MCC']
     }
 }
 

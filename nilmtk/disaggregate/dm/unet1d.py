@@ -6,6 +6,9 @@ from einops import rearrange
 import torch.nn.functional as F
 import seaborn as sns
 import matplotlib.pyplot as plt
+from torchvision import transforms
+from PIL import Image
+import requests
 
 
 def exists(x):
@@ -338,6 +341,11 @@ class UNet1D(nn.Module):
         else:
             x = output_noisy
 
+        vis = None
+        if self.draw_attn:
+            vis = Visualizer()
+            vis.draw_power(output_noisy, condition)
+
         orig_x = x
         t = None
         # if time is not None and exists(self.time_mlp):
@@ -349,17 +357,23 @@ class UNet1D(nn.Module):
         original_mean = torch.mean(x, [1, 2], keepdim=True)
         h = []
 
+        fmaps = []
+
         for convnext, convnext2, attn, downsample in self.downs:
             x = convnext(x, t)
             x = convnext2(x, t)
+            if vis is not None:
+                fmaps.append(x)
             x, _ = attn(x)
             h.append(x)
             x = downsample(x)
 
         x = self.mid_block1(x, t)
+        if vis is not None:
+            fmaps.append(x)
+
         x, qk = self.mid_attn(x)
-        if self.draw_attn:
-            visualize_attention_weights(qk, "weights")
+
         # visualize_attention_weights(x, "conved")
         x = self.mid_block2(x, t)
 
@@ -368,10 +382,17 @@ class UNet1D(nn.Module):
             x = torch.cat((x, h.pop()), dim=1)
             x = convnext(x, t)
             x = convnext2(x, t)
+            if vis is not None:
+                fmaps.append(x)
             x, _ = attn(x)
             x = upsample(x)
         if self.residual:
             return self.final_conv(x) + orig_x
+
+        if vis is not None:
+            vis.visualize(fmaps)
+            visualize_attention_weights(qk, "weights")
+            self.draw_attn = False
 
         out = self.final_conv(x)
         if self.output_mean_scale:
@@ -405,19 +426,57 @@ class UNet1D(nn.Module):
             for param in layer.parameters():
                 param.requires_grad = True
 
-        # def freeze_module(m):
-        #     if isinstance(m, nn.ModuleList) or isinstance(m, nn.Sequential):
-        #         for mod in m:
-        #             freeze_module(mod)
-        #     # elif
-        #     elif isinstance(m, Residual) or isinstance(m, LinearAttention):
-        #         for par in m.parameters():
-        #             par.requires_grad = True
-        #         print(type(m), len(list(m.parameters())), "+")
-        #     else:
-        #         pass
-        #         # m.requires_grad_(req_grad)
-        #         print(type(m), len(list(m.parameters())), "-")
-        #
-        # for module in self.modules():
-        #     freeze_module(module)
+
+# Process the input image
+def process_image(image_path):
+    transform = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Resize((256, 256)),
+        transforms.ToTensor(),
+    ])
+    image = Image.open(requests.get(image_path, stream=True).raw)
+    image = transform(image).unsqueeze(0)
+    return image
+
+
+# Visualize the feature maps
+def visualize_feature_maps(model, image):
+    feature_maps = model(image)
+    for layer_num, fmap in enumerate(feature_maps):
+        plt.figure(figsize=(15, 15))
+        layer_fmaps = fmap.squeeze(0)
+        for i in range(min(layer_fmaps.size(0), 16)):  # Displaying first 16 feature maps
+            plt.subplot(4, 4, i + 1)  # 4x4 grid for the feature maps
+            plt.imshow(layer_fmaps[i].detach().cpu().numpy(), cmap='gray')
+            plt.axis('off')
+        plt.show()
+
+
+class Visualizer:
+    def __init__(self):
+        plt.figure(figsize=(15, 15))
+        self.plt_idx = 1
+
+    def draw_power(self, app, mains):
+        print(app.shape, mains.shape)
+
+        plt.subplot(4, 4, self.plt_idx)
+        plt.plot(mains[0][0].detach().cpu().numpy(), linewidth=1, color="dimgray")
+        plt.plot(app[0][0].detach().cpu().numpy(), linewidth=1)
+        plt.axis('off')
+
+        self.plt_idx += 1
+
+    def visualize(self, feature_maps):
+        # for i in [0, 2, 4, 6]:
+        for i in range(len(feature_maps)):
+            layer_fmaps = feature_maps[i]
+            print(layer_fmaps.shape)
+            plt.subplot(4, 4, self.plt_idx)
+            plt.imshow(layer_fmaps[0].detach().cpu().numpy())
+            # plt.title(f'{}')
+            plt.axis('off')
+            self.plt_idx += 1
+
+    def show(self):
+        plt.show()

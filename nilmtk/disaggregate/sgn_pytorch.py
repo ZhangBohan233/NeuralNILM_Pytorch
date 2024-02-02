@@ -18,6 +18,7 @@ from torch.utils.data.dataset import TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 import time
+import nilmtk.utils as utils
 
 # Fix the random seed to ensure the reproducibility of the experiment
 random_seed = 10
@@ -31,6 +32,8 @@ torch.backends.cudnn.benchmark = False
 
 # Use cuda or not
 USE_CUDA = torch.cuda.is_available()
+
+TEST_ON_GPU = True
 
 
 class sgn_branch_network(nn.Module):
@@ -243,6 +246,7 @@ class SGN(Disaggregator):
         self.n_epochs = params.get('n_epochs', 10)
         self.batch_size = params.get('batch_size', 512)
         self.appliance_params = params.get('appliance_params', {})
+        self.app_meta = params.get('app_meta', utils.APP_META['ukdale'])
         self.mains_mean = params.get('mains_mean', None)
         self.mains_std = params.get('mains_std', None)
         self.test_only = params.get('test_only', False)
@@ -286,8 +290,8 @@ class SGN(Disaggregator):
             model = self.models[appliance_name]
             if not self.test_only:
                 train(appliance_name, model, train_main, power, self.n_epochs, self.batch_size,
-                      (15.0 - self.appliance_params[app_name]['mean']) /
-                      self.appliance_params[app_name]['std'], pretrain, checkpoint_interval=3,
+                      (15.0 - self.appliance_params[appliance_name]['mean']) /
+                      self.appliance_params[appliance_name]['std'], pretrain, checkpoint_interval=3,
                       train_patience=self.patience,
                       note=self.note)
             # Model test will be based on the best model
@@ -306,9 +310,11 @@ class SGN(Disaggregator):
             test_main = test_mains_df.values.reshape((-1, self.mains_length, 1))
             for appliance in self.models:
                 # Move the model to cpu, and then test it
-                # model = self.models[appliance]
-                model = self.models[appliance].to('cpu')
-                predict = test(model, test_main, gpu_test=False)
+                if USE_CUDA and TEST_ON_GPU:
+                    model = self.models[appliance].cuda()
+                else:
+                    model = self.models[appliance].to('cpu')
+                predict = test(model, test_main, gpu_test=TEST_ON_GPU)
 
                 l1 = self.mains_length
                 l2 = self.appliance_length
@@ -326,7 +332,7 @@ class SGN(Disaggregator):
                 prediction = self.appliance_params[appliance]['mean'] + (
                             sum_arr * self.appliance_params[appliance]['std'])
                 if self.gate_only:
-                    thresh = 15
+                    thresh = self.app_meta[appliance]['on']
                     prediction = np.where(prediction > thresh, 1, 0)
 
                 valid_predictions = prediction.flatten()

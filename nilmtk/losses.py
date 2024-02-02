@@ -7,6 +7,25 @@ on_threhold = {'fridge': 50, 'kettle': 2000, 'dish washer': 50, 'washing machine
                'drill': 0}
 
 
+SAE_DIV_LEN = 720
+
+
+def sae(app_name, app_gt, app_pred):
+    sae_sum = 0
+
+    n_seg = len(app_gt) // SAE_DIV_LEN
+    for i in range(n_seg):
+        idx = i * SAE_DIV_LEN
+        gt = app_gt[idx:idx + SAE_DIV_LEN]
+        pred = app_pred[idx:idx + SAE_DIV_LEN]
+        gt_sum = np.sum(gt)
+        pred_sum = np.sum(pred)
+        diff = np.abs(pred_sum - gt_sum)
+        sae_sum += diff / SAE_DIV_LEN
+
+    return sae_sum / n_seg
+
+
 def mae(app_name, app_gt, app_pred):
     return mean_absolute_error(app_gt, app_pred)
 
