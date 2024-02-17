@@ -15,6 +15,26 @@ from sklearn.metrics import mean_squared_error
 
 from nilmtk.datastore import HDFDataStore, CSVDataStore
 
+GENERAL_APP_META = {
+    "mains": {
+        "on": 0, "max": 8000
+    },
+    "kettle": {
+        "on": 2000, "max": 3100, "min_on": 12, "min_off": 0, "standby": 1.011
+    },
+    "fridge": {
+        "on": 50, "max": 400, "min_on": 60, "min_off": 12, "standby": 10.146
+    },
+    "washing machine": {
+        "on": 40, "max": 3500, "min_on": 1800, "min_off": 160, "standby": 3.001
+    },
+    "microwave": {
+        "on": 200, "max": 3000, "min_on": 12, "min_off": 30, "standby": 0.368
+    },
+    "dish washer": {
+        "on": 50, "max": 2500, "min_on": 1800, "min_off": 1800, "standby": 0.882
+    }
+}
 
 APP_META = {
     "ukdale": {
@@ -76,7 +96,7 @@ APP_META = {
             "on": 200, "max": 1800, "min_on": 12, "min_off": 30
         },
         "dish washer": {
-            "on": 10, "max": 1200, "min_on": 1800, "min_off": 1800
+            "on": 10, "max": 1200, "min_on": 180, "min_off": 180
         }
     }
 }
@@ -194,8 +214,8 @@ def find_nearest(known_array, test_array):
     known_array_sorted = known_array[index_sorted]
 
     idx1 = np.searchsorted(known_array_sorted, test_array)
-    idx2 = np.clip(idx1 - 1, 0, len(known_array_sorted)-1)
-    idx3 = np.clip(idx1,     0, len(known_array_sorted)-1)
+    idx2 = np.clip(idx1 - 1, 0, len(known_array_sorted) - 1)
+    idx3 = np.clip(idx1, 0, len(known_array_sorted) - 1)
 
     diff1 = known_array_sorted[idx3] - test_array
     diff2 = test_array - known_array_sorted[idx2]
@@ -475,10 +495,10 @@ def compute_rmse(ground_truth, predictions, pretty=True):
     Returns
     -------
     pandas.Series with the RMSe for each appliance
-    """ 
-    
+    """
+
     # This was initially added to simplify examples, see #652.
-    
+
     rms_error = []
     app_counts = defaultdict(int)
     for app_idx, app in enumerate(ground_truth.columns):
@@ -490,14 +510,14 @@ def compute_rmse(ground_truth, predictions, pretty=True):
                 app_label = app
         else:
             app_label = app
-        
+
         gt_app = ground_truth.iloc[:, app_idx]
         pred_app = predictions.iloc[:, app_idx]
-        if pred_app.empty: 
+        if pred_app.empty:
             continue
-            
+
         df_app = pd.DataFrame({'gt': gt_app, 'pr': pred_app}, index=gt_app.index).dropna()
-        
+
         if not df_app.empty:
             app_rms_error = np.sqrt(mean_squared_error(df_app['gt'], df_app['pr']))
         else:
@@ -505,7 +525,7 @@ def compute_rmse(ground_truth, predictions, pretty=True):
 
         if pretty:
             app_counts[app_label] += 1
-            
+
         rms_error.append([app, app_label, app_rms_error])
 
     if pretty:
@@ -524,7 +544,7 @@ def compute_rmse(ground_truth, predictions, pretty=True):
                     app.building,
                     app.instance
                 )
-            
+
     return pd.Series(dict(
         (item[1], item[2]) for item in rms_error
     ))
@@ -533,11 +553,10 @@ def compute_rmse(ground_truth, predictions, pretty=True):
 def safe_resample(data, **resample_kwargs):
     if data.empty:
         return data
-    
+
     def _resample_chain(data, all_resample_kwargs):
         """_resample_chain provides a compatibility function for 
         deprecated/removed DataFrame.resample kwargs"""
-        
 
         rule = all_resample_kwargs.pop('rule')
         axis = all_resample_kwargs.pop('axis', None)
@@ -554,7 +573,7 @@ def safe_resample(data, **resample_kwargs):
             fill_method = lambda df: getattr(df, fill_method_str)()
         else:
             fill_method = lambda df: df
-            
+
         how_str = all_resample_kwargs.pop('how', None)
         if how_str:
             how = lambda df: getattr(df, how_str)()
@@ -562,19 +581,18 @@ def safe_resample(data, **resample_kwargs):
             how = lambda df: df
 
         if resample_kwargs:
-            warnings.warn("Not all resample_kwargs were consumed: {}".format(repr(resample_kwargs))) 
-        
+            warnings.warn("Not all resample_kwargs were consumed: {}".format(repr(resample_kwargs)))
+
         return fill_method(how(data.resample(rule, **resample_kwargs)))
-       
 
     try:
         dups_in_index = data.index.duplicated(keep='first')
 
-        #TODO: remove this after validation tests are ready
+        # TODO: remove this after validation tests are ready
         if dups_in_index.any():
             warnings.warn("Found duplicate index. Keeping first value")
             data = data[~dups_in_index]
-            
+
         data = _resample_chain(data, resample_kwargs)
     except pytz.AmbiguousTimeError:
         # Work-around for
@@ -582,6 +600,6 @@ def safe_resample(data, **resample_kwargs):
         tz = data.index.tz.zone
         data = data.tz_convert('UTC')
         data = _resample_chain(data, resample_kwargs)
-        
+
         data = data.tz_convert(tz)
     return data

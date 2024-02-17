@@ -410,17 +410,6 @@ class UNet1D(nn.Module):
         for param in self.parameters():
             param.requires_grad = req_grad
 
-        # for module in self.modules():
-        #     if (isinstance(module, LinearAttention) or
-        #             isinstance(module, Residual)):
-        #             # isinstance(module, Downsample) or isinstance(module, Upsample)):
-        #         for param in module.parameters():
-        #             param.requires_grad = True
-        #         print(type(module))
-        #
-        # for param in self.final_conv.parameters():
-        #     param.requires_grad = True
-        #
         for layer in self.fine_tunes:
             print(type(layer))
             for param in layer.parameters():

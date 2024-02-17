@@ -1,13 +1,15 @@
 from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, recall_score, \
     accuracy_score, precision_score, matthews_corrcoef
 import numpy as np
+import nilmtk.utils as utils
 
-on_threhold = {'fridge': 50, 'kettle': 2000, 'dish washer': 50, 'washing machine': 40,
-               'microwave': 200,
-               'drill': 0}
+# on_threhold = {'fridge': 50, 'kettle': 2000, 'dish washer': 50, 'washing machine': 40,
+#                'microwave': 200,
+#                'drill': 0}
+on_threhold = {app: data['on'] for app, data in utils.GENERAL_APP_META.items()}
 
 
-SAE_DIV_LEN = 720
+SAE_DIV_LEN = 1200
 
 
 def sae(app_name, app_gt, app_pred):

@@ -43,7 +43,7 @@ class API():
         if 'app_meta' in params:
             self.app_meta = params['app_meta']
         else:
-            self.app_meta = utils.APP_META['ukdale']
+            self.app_meta = utils.GENERAL_APP_META
         for elems in params['power']:
             self.power = params['power']
         self.sample_period = params['sample_rate']
@@ -65,6 +65,10 @@ class API():
             self.save_note = params['save_note']
         else:
             self.save_note = None
+        if 'csv_path' in params:
+            self.csv_path = params['csv_path']
+        else:
+            self.csv_path = None
         self.gater = None
         self.gater_method = params['gater'] if 'gater' in params else None
 
@@ -84,7 +88,7 @@ class API():
         trans = self.transfer_dataset_dict
 
         if self.gater is not None:
-            self.train_jointly(self.gater, d, trans)
+            self.train_jointly(self.gater, d, None)
 
         for model_name, clf in self.classifiers:
             # If the model is a neural net, it has an attribute n_epochs, Ex: DAE, Seq2Point
@@ -163,6 +167,7 @@ class API():
                     self.train_submeters[i] = self.train_submeters[i].append(appliance_readings[i])
 
         if trans_d is not None:
+            self.transfer_mains = pd.DataFrame()
             self.transfer_submeters = [pd.DataFrame() for i in range(len(self.appliances))]
             for dataset in trans_d:
                 print("Loading transfer data for ", dataset, " dataset")
@@ -204,28 +209,12 @@ class API():
                     if self.DROP_ALL_NANS:
                         transfer_df, appliance_readings = (
                             self.dropna(transfer_df, appliance_readings))
-                    # if self.artificial_aggregate:
-                    #     print("Creating an Artificial Aggregate for Transfer")
-                    #     transfer_df = pd.DataFrame(np.zeros(appliance_readings[0].shape),
-                    #                                index=appliance_readings[0].index,
-                    #                                columns=appliance_readings[0].columns)
-                    #     for app_reading in appliance_readings:
-                    #         transfer_df += app_reading
 
                     print("Transfer Jointly")
                     self.transfer_mains = self.transfer_mains.append(transfer_df)
                     for i, appliance_name in enumerate(self.appliances):
                         self.transfer_submeters[i] = self.transfer_submeters[i].append(
                             appliance_readings[i])
-
-                    # plt.figure(figsize=(28, 10))
-                    # plt.plot(self.transfer_mains[:10000], label='Transfer main')
-                    # for i in range(len(self.transfer_submeters)):
-                    #     plt.plot(self.transfer_submeters[i][:10000], label='Transfer truth')
-                    # # plt.plot(pred_overall[clf][i], label='')
-                    # plt.title("Transfer")
-                    # plt.legend()
-                    # plt.show()
 
         appliance_readings = []
         transfer_app_readings = []
@@ -234,11 +223,12 @@ class API():
             if trans_d is not None:
                 transfer_app_readings.append((appliance_name, [self.transfer_submeters[i]]))
 
+        # print("Transfer main of", type(clf), self.transfer_mains, self.transfer_submeters)
         self.train_mains = [self.train_mains]
         self.transfer_mains = [self.transfer_mains]
         self.train_submeters = appliance_readings
         self.transfer_submeters = transfer_app_readings
-        # print(type(self.train_mains), type(self.transfer_mains))
+        # print("Train and Transfer", self.train_mains, self.transfer_mains)
         if self.transfer_dataset_dict is not None:
             clf.partial_fit(self.train_mains, self.train_submeters, self.pre_trained, True,
                             dst_main=self.transfer_mains, dst_appliances=self.transfer_submeters)
@@ -415,7 +405,10 @@ class API():
             if self.save_note is not None:
                 path = self.save_note + "-" + path
             if self.save:
-                general_df.to_csv("./" + path)
+                if self.csv_path is not None:
+                    general_df.to_csv(self.csv_path)
+                else:
+                    general_df.to_csv("./" + path)
 
         if gt_overall.size == 0:
             print("No samples found in ground truth")

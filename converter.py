@@ -135,7 +135,7 @@ def plot(on_off_data: pd.DataFrame, appliances: list):
             on = row['Value'] == 1
             if on:
                 timespan = row['EndDate'] - row['BeginDate']
-                min_span = pd.Timedelta(minutes=12)
+                min_span = pd.Timedelta(minutes=24)
                 if timespan < min_span:
                     end_date = row['BeginDate'] + min_span
                 else:
@@ -153,19 +153,19 @@ def plot(on_off_data: pd.DataFrame, appliances: list):
             name=f'{percent:.2f}%{"  " if percent < 10 else ""} {NAME_MAP[app_name]}',
             mode='lines',
             line=dict(
-                width=15,
+                width=20,
             ),
             connectgaps=False
         )
         data.append(trace)
 
     layout = go.Layout(
-        title="Appliance Status",
+        # title="Appliance Status",
         yaxis=dict(
             visible=False
         ),
-        width=1200,
-        height=400,
+        width=660,
+        height=280,
     )
     # layout.coloraxis.colorbar.title.side = "top"
     # fig = dict(data=data, layout=layout)
@@ -173,7 +173,7 @@ def plot(on_off_data: pd.DataFrame, appliances: list):
     # # plotly.offline.iplot(fig, filename='basic-scatter')
     # plotly.offline.plot(fig)
     fig = go.Figure(data=data, layout=layout)
-    fig.write_image("sample_fig.png", scale=5)
+    fig.write_image("sample_fig.png", scale=3)
     fig.show()
 
 
@@ -197,7 +197,7 @@ if __name__ == '__main__':
                     'buildings': {
                         1: {
                             'start_time': '2013-09-01',
-                            'end_time': '2013-09-08'
+                            'end_time': '2013-09-06'
                         },
                     },
                 }

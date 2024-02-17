@@ -38,10 +38,10 @@ REDD_TRAIN_STD = {
             'start_time': '2011-04-19',
             'end_time': '2011-05-30'
         },
-        # 6: {
-        #     'start_time': '2011-05-22',
-        #     'end_time': '2011-06-13'
-        # },
+        6: {
+            'start_time': '2011-05-22',
+            'end_time': '2011-06-13'
+        },
     }
 
 }
@@ -107,16 +107,17 @@ e = {
         'appliance': ['active']
     },
     'sample_rate': 3,
-    # 'appliances': ['dish washer'],
+    # 'appliances': ['washing machine'],
     'app_meta': utils.APP_META[USING_DATASET],
-    'appliances': ['microwave'],
+    'appliances': ['fridge'],
     # Universally no pre-training
     'pre_trained': False,
     # Specify algorithm hyper-parameters
     'save_note': 'gated',
     'gater': SGN(
         {'n_epochs': 0, 'batch_size': 256,
-         'sequence_length': 400, 'appliance_length': 64,
+         'sequence_length': 400 if USING_DATASET == 'redd' else 200,
+         'appliance_length': 64 if USING_DATASET == 'redd' else 32,
          'test_only': True, 'gate_only': True,
          'note': USING_DATASET}),
     'methods': {
@@ -124,7 +125,7 @@ e = {
             {'n_epochs': 400 if USING_DATASET == "redd" else 100,
              'batch_size': 64, 'sequence_length': 720, 'overlapping_step': 10,
              'note': USING_DATASET,
-             'test_only': False, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
+             'test_only': True, 'fine_tune': False, 'src_rate': 0.5, 'lr': 3e-5,
              "sampler": "ddim",
              'patience': 5 if USING_DATASET == "redd" else 3,
              "app_meta": utils.APP_META[USING_DATASET], 'filter_train': True
@@ -136,50 +137,16 @@ e = {
         'datasets': {
             'redd': REDD_TRAIN_STD
             # 'ukdale': UKDALE_TRAIN_STD
+            # 'ukdale': UKDALE_TEST_STD
         }
     },
-    # 'transfer': {
-    #     'datasets': {
-    #         'redd': {
-    #             'path': 'mnt/redd.h5',
-    #             'buildings': {
-    #                 # 1: {
-    #                 #     'start_time': '2011-04-19',
-    #                 #     'end_time': '2011-05-04'
-    #                 # }
-    #                 2: {
-    #                     'start_time': '2011-04-18',
-    #                     'end_time': '2011-04-25'
-    #                 }
-    #             }
-    #         },
-    #         # 'ukdale': {
-    #         #   'path': 'mnt/ukdale.h5',
-    #         #   'buildings': {
-    #         #         1: {
-    #         #               'start_time': '2013-05-01 00:00',
-    #         #               'end_time': '2013-05-14 00:00'
-    #         #         }
-    #         #     }
-    #         #   },
-    #     },
-    # },
     'test': {
         'datasets': {
-            # 'ukdale': {
-            #   'path': 'mnt/ukdale.h5',
-            #   'buildings': {
-            #         2: {
-            #               'start_time': '2013-05-22 00:00',
-            #               'end_time': '2013-08-01 00:00'
-            #         }
-            #     }
-            #   },
             'redd': REDD_TEST_STD,
             # 'ukdale': UKDALE_TEST_STD
         },
         # Specify evaluation metrics
-        'metrics': ['accuracy', 'f1score', 'mae', 'sae', 'precision', 'recall', 'nep', 'MCC']
+        'metrics': ['accuracy', 'f1score', 'mae', 'sae', 'precision', 'recall']
     }
 }
 

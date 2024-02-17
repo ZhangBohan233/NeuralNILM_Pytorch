@@ -150,75 +150,101 @@ def shuffle_train_val(mains, appliances, val_rate=0.2, segments=16):
 
 
 def fine_tune(appliance_name, model,
-              mains, appliance,
+              # mains, appliance,
               mains_dst, appliance_dst,
               sequence_length,
-              epochs, batch_size, pretrain,
+              epochs, batch_size,
+              threshold,
+              model_note,
               src_rate=1.0,
+              filter_train=False,
               checkpoint_interval=None, train_patience=5, lr=5e-6, gpu_dataset=False,
-              stride=1, src_dataset="", freeze=True):
+              stride=1, src_dataset="", freeze=True, weight_decay=0.01):
     # Model configuration
     gpu_dataset = gpu_dataset and USE_CUDA
     if USE_CUDA:
         model = model.cuda()
-    if not pretrain:
-        model.apply(initialize)
+
     print("Cuda avail", USE_CUDA, "GPU dataset", gpu_dataset)
-    print("Main shape", mains.shape)
-    print("App shape", appliance.shape)
-    print("Main dst shape", mains_dst.shape)
-    print("App dst shape", appliance_dst.shape)
+    # print("Main shape", mains.shape)
+    # print("App shape", appliance.shape)
     # summary(model, (1, mains.shape[1]))
     # Split the train and validation set
 
-    base_name = "./" + appliance_name + "_dm_ft"
-    if freeze:
-        base_name += "_freeze"
+    base_name = "./" + appliance_name + "_" + model_note + f"_dm{'_g2' if filter_train else ''}"
+    # if freeze:
+    #     base_name += "_freeze"
 
     out_dir = base_name + "_training"
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
 
-    mains = mains.reshape(1, -1)
-    appliance = appliance.reshape(1, -1)
+    # mains = mains.reshape(1, -1)
+    # appliance = appliance.reshape(1, -1)
 
     # Plotting
-    plt.figure(figsize=(12, 6))
-    plt.plot(mains[0], label='mains', linewidth=1)
-    plt.plot(appliance[0], label='truth', linewidth=1)
+    # plt.figure(figsize=(12, 6))
+    # plt.plot(mains[0], label='mains', linewidth=1)
+    # plt.plot(appliance[0], label='truth', linewidth=1)
 
-    plt.show()
+    # plt.show()
 
-    train_mains, train_appliance, valid_mains, valid_appliance = \
-        shuffle_train_val(mains_dst,
-                          appliance_dst,
-                          segments=1)
+    # if src_rate != 0:
+    #     train_mains_src, train_appliance_src, valid_mains_src, valid_appliance_src = \
+    #         shuffle_train_val(mains,
+    #                           appliance,
+    #                           segments=1)
+    #
+    #     len_src = round(train_mains.shape[0] * src_rate)
+    #     len_src_val = round(valid_mains.shape[0] * src_rate)
+    #     train_mains = np.concatenate([train_mains, train_mains_src[:len_src]], axis=1)
+    #     valid_mains = np.concatenate([valid_mains, valid_mains_src[:len_src_val]], axis=1)
+    #     train_appliance = np.concatenate([train_appliance, train_appliance_src[:len_src]], axis=1)
+    #     valid_appliance = np.concatenate([valid_appliance, valid_appliance_src[:len_src_val]],
+    #                                      axis=1)
 
-    if src_rate != 0:
-        train_mains_src, train_appliance_src, valid_mains_src, valid_appliance_src = \
-            shuffle_train_val(mains,
-                              appliance,
-                              segments=1)
+    mains_dst = mains_dst.reshape(1, -1)
+    appliance_dst = appliance_dst.reshape(1, -1)
 
-        len_src = round(train_mains.shape[0] * src_rate)
-        len_src_val = round(valid_mains.shape[0] * src_rate)
-        train_mains = np.concatenate([train_mains, train_mains_src[:len_src]], axis=1)
-        valid_mains = np.concatenate([valid_mains, valid_mains_src[:len_src_val]], axis=1)
-        train_appliance = np.concatenate([train_appliance, train_appliance_src[:len_src]], axis=1)
-        valid_appliance = np.concatenate([valid_appliance, valid_appliance_src[:len_src_val]],
-                                         axis=1)
+    print("Main dst shape", mains_dst.shape)
+    print("App dst shape", appliance_dst.shape)
+
+    if filter_train:
+        real_mains = []
+        real_appliances = []
+
+        for i in range(0, mains_dst.shape[1], sequence_length):
+            main = mains_dst[:, i:i + sequence_length]
+            app = appliance_dst[:, i:i + sequence_length]
+            if (app > threshold).any():
+                real_mains.append(main)
+                real_appliances.append(app)
+
+        mains_dst = np.concatenate(real_mains, 1)
+        appliance_dst = np.concatenate(real_appliances, 1)
+        print("Main shape valid", mains_dst.shape)
+        print("App shape valid", appliance_dst.shape)
+
+    # train_mains, train_appliance, valid_mains, valid_appliance = \
+    #     shuffle_train_val(mains_dst,
+    #                       appliance_dst,
+    #                       segments=1)
+    train_mains = mains_dst
+    train_appliance = appliance_dst
 
     # Create optimizer, loss function, and dataloader
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
-                                  lr=lr)
+                                  lr=lr, weight_decay=weight_decay)
     # optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
     #                             lr=lr)
-
-    ckpt_name = "./" + appliance_name + "_" + src_dataset + "_dm_best_checkpoint.pt"
-    checkpoint = torch.load(ckpt_name)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    # if filter_train:
+    #     ckpt_name = "./" + appliance_name + "_" + src_dataset + "_dm_g2_best_checkpoint.pt"
+    # else:
+    #     ckpt_name = "./" + appliance_name + "_" + src_dataset + "_dm_best_checkpoint.pt"
+    # checkpoint = torch.load(ckpt_name)
+    # model.load_state_dict(checkpoint['model_state_dict'])
     # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    print("Loaded state dict again from: " + ckpt_name)
+    # print("Loaded state dict again from: " + ckpt_name)
 
     if freeze:
         model.freeze(True)
@@ -239,15 +265,15 @@ def fine_tune(appliance_name, model,
                                   num_workers=0,
                                   drop_last=True)
 
-    valid_dataset = GpuDataset(sequence_length,
-                               torch.from_numpy(valid_mains).float(),
-                               torch.from_numpy(valid_appliance).float(),
-                               stride=stride,
-                               gpu=gpu_dataset)
-
-    valid_loader = tud.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,
-                                  num_workers=0,
-                                  drop_last=True)
+    # valid_dataset = GpuDataset(sequence_length,
+    #                            torch.from_numpy(valid_mains).float(),
+    #                            torch.from_numpy(valid_appliance).float(),
+    #                            stride=stride,
+    #                            gpu=gpu_dataset)
+    #
+    # valid_loader = tud.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,
+    #                               num_workers=0,
+    #                               drop_last=True)
 
     # raise RuntimeError
 
@@ -257,6 +283,8 @@ def fine_tune(appliance_name, model,
     patience, best_loss = 0, None
 
     n_batches = len(train_loader)
+
+    print("Train batches:", len(train_loader))
 
     for epoch in range(epochs):
         # Earlystopping
@@ -297,28 +325,30 @@ def fine_tune(appliance_name, model,
 
         # Evaluate the model
         model.eval()
-        with torch.no_grad():
-            cnt, loss_sum = 0, 0
-            for i, (batch_mains, batch_appliance) in enumerate(valid_loader):
-                if USE_CUDA and not gpu_dataset:
-                    batch_mains = batch_mains.cuda()
-                    batch_appliance = batch_appliance.cuda()
-
-                # DM special
-                noise, noise_hat = model.train_step(batch_appliance, batch_mains)
-                loss = loss_fn(noise, noise_hat)
-
-                # batch_pred = model(batch_mains)
-                # loss = loss_fn(batch_appliance, batch_pred)
-                loss_sum += loss.item()
-                cnt += 1
+        # with torch.no_grad():
+        #     cnt, loss_sum = 0, 0
+        #     for i, (batch_mains, batch_appliance) in enumerate(valid_loader):
+        #         if USE_CUDA and not gpu_dataset:
+        #             batch_mains = batch_mains.cuda()
+        #             batch_appliance = batch_appliance.cuda()
+        #
+        #         # DM special
+        #         noise, noise_hat = model.train_step(batch_appliance, batch_mains)
+        #         loss = loss_fn(noise, noise_hat)
+        #
+        #         # batch_pred = model(batch_mains)
+        #         # loss = loss_fn(batch_appliance, batch_pred)
+        #         loss_sum += loss.item()
+        #         cnt += 1
 
         # generate some samples
         with torch.no_grad():
-            valid_dataset.disable_rnd_shift()
+            # valid_dataset.disable_rnd_shift()
+            train_dataset.disable_rnd_shift()
             sampler = DDIM_Sampler2(model.model)
             fwd = sequence_length // stride
-            batch_n = min(len(valid_loader.dataset) // fwd, batch_size)
+            batch_n = min(len(train_dataset) // fwd, batch_size)
+            # batch_n = min(len(valid_loader.dataset) // fwd, batch_size)
             batch_input = torch.zeros((batch_n, 1, sequence_length))
             batch_truth = torch.zeros((batch_n, 1, sequence_length))
             if USE_CUDA:
@@ -326,7 +356,8 @@ def fine_tune(appliance_name, model,
                 batch_truth = batch_truth.cuda()
             for i in range(0, batch_n, 1):
                 idx = i * fwd
-                (batch_mains, batch_appliance) = valid_loader.dataset[idx]
+                (batch_mains, batch_appliance) = train_loader.dataset[idx]
+                # (batch_mains, batch_appliance) = valid_loader.dataset[idx]
                 if USE_CUDA and not gpu_dataset:
                     batch_mains = batch_mains.cuda()
                     batch_appliance = batch_appliance.cuda()
@@ -355,54 +386,57 @@ def fine_tune(appliance_name, model,
             plt.savefig(f'{out_dir}/epoch{epoch}.png')
             plt.show()
 
-            valid_dataset.enable_rnd_shift()
+            # valid_dataset.enable_rnd_shift()
+            train_dataset.enable_rnd_shift()
 
-        final_loss = loss_sum / cnt
-        # Save best only
-        if best_loss is None or final_loss < best_loss:
-            best_loss = final_loss
-            patience = 0
-            net_state_dict = model.state_dict()
-            path_state_dict = base_name + "_best_state_dict.pt"
-            torch.save(net_state_dict, path_state_dict)
+        # final_loss = loss_sum / cnt
+        # # Save best only
+        # if best_loss is None or final_loss < best_loss:
+        #     best_loss = final_loss
+        #     patience = 0
+        net_state_dict = model.state_dict()
+        path_state_dict = base_name + "_best_state_dict.pt"
+        torch.save(net_state_dict, path_state_dict)
 
-            checkpoint = {"model_state_dict": model.state_dict(),
-                          "optimizer_state_dict": optimizer.state_dict(),
-                          "epoch": epoch}
+        checkpoint = {"model_state_dict": model.state_dict(),
+                      "optimizer_state_dict": optimizer.state_dict(),
+                      "epoch": epoch}
 
-            path_checkpoint = base_name + "_best_checkpoint.pt"
-            torch.save(checkpoint, path_checkpoint)
-        else:
-            patience = patience + 1
+        path_checkpoint = base_name + "_best_checkpoint.pt"
+        torch.save(checkpoint, path_checkpoint)
+        # else:
+        #     patience = patience + 1
 
-        losses.append((epoch, train_loss_sum / train_cnt, loss_sum / cnt, (ed - st)))
+        # losses.append((epoch, train_loss_sum / train_cnt, loss_sum / cnt, (ed - st)))
+        # print(
+        #     "Epoch: {}, Valid_Loss: {}, Time consumption: {}s.".format(epoch, final_loss, ed - st))
         print(
-            "Epoch: {}, Valid_Loss: {}, Time consumption: {}s.".format(epoch, final_loss, ed - st))
+            "Epoch: {}, Train: {}, Time consumption: {}s.".format(epoch, train_loss_sum / train_cnt, ed - st))
         # For the visualization of training process
 
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                writer.add_histogram(name + '_grad', param.grad, epoch)
-                writer.add_histogram(name + '_data', param, epoch)
-        writer.add_scalars("MSELoss", {"Valid": final_loss}, epoch)
-
-        # Save checkpoint
-        if (checkpoint_interval != None) and ((epoch + 1) % checkpoint_interval == 0):
-            checkpoint = {"model_state_dict": model.state_dict(),
-                          "optimizer_state_dict": optimizer.state_dict(),
-                          "epoch": epoch}
-
-            path_checkpoint = base_name + "_checkpoint_{}_epoch.pt".format(epoch)
-            torch.save(checkpoint, path_checkpoint)
-
-        # write once at the end of each epoch
-        if not os.path.exists(out_dir):
-            os.mkdir(out_dir)
-        df = pd.DataFrame({'epoch': [lo[0] for lo in losses],
-                           'train_loss': [lo[1] for lo in losses],
-                           'val_loss': [lo[2] for lo in losses],
-                           'time': [lo[3] for lo in losses]})
-        df.to_csv(out_dir + '/loss.csv', index=False)
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         writer.add_histogram(name + '_grad', param.grad, epoch)
+        #         writer.add_histogram(name + '_data', param, epoch)
+        # writer.add_scalars("MSELoss", {"Valid": final_loss}, epoch)
+        #
+        # # Save checkpoint
+        # if (checkpoint_interval != None) and ((epoch + 1) % checkpoint_interval == 0):
+        #     checkpoint = {"model_state_dict": model.state_dict(),
+        #                   "optimizer_state_dict": optimizer.state_dict(),
+        #                   "epoch": epoch}
+        #
+        #     path_checkpoint = base_name + "_checkpoint_{}_epoch.pt".format(epoch)
+        #     torch.save(checkpoint, path_checkpoint)
+        #
+        # # write once at the end of each epoch
+        # if not os.path.exists(out_dir):
+        #     os.mkdir(out_dir)
+        # df = pd.DataFrame({'epoch': [lo[0] for lo in losses],
+        #                    'train_loss': [lo[1] for lo in losses],
+        #                    'val_loss': [lo[2] for lo in losses],
+        #                    'time': [lo[3] for lo in losses]})
+        # df.to_csv(out_dir + '/loss.csv', index=False)
 
 
 def train(appliance_name, model: ConditionalDiffusion,
@@ -654,7 +688,8 @@ def train(appliance_name, model: ConditionalDiffusion,
         df.to_csv(out_dir + '/loss.csv', index=False)
 
 
-def test(model: ConditionalDiffusion, sequence_length, test_mains, batch_size=512, gpu_dataset=False,
+def test(model: ConditionalDiffusion, sequence_length, test_mains, batch_size=512,
+         gpu_dataset=False,
          pred_gate=None, plot_net=False):
     if USE_CUDA:
         model = model.cuda()
@@ -720,7 +755,7 @@ class DM_GATE2(Disaggregator):
         self.lr = params.get('lr', 5e-6 if self.fine_tune else 3e-5)
         self.sampler_class = params.get("sampler", "ddpm")
         self.src_rate = params.get("src_rate", 1.0)
-        self.app_meta = params.get("app_meta", utils.APP_META['ukdale'])
+        self.app_meta = params.get("app_meta", utils.GENERAL_APP_META)
         self.filter_train = params.get("filter_train", True)
         self.note = params.get("note", "")
         self.load_from = params.get("load_from", self.note)
@@ -728,6 +763,7 @@ class DM_GATE2(Disaggregator):
         self.scaler = "minmax"
         self.freeze = params.get('freeze', False)
         self.plot = params.get('plot', False)
+        self.weight_decay = params.get('weight_decay', 0.005)
 
     def partial_fit(self, train_main, train_appliances, pretrain=False, do_preprocessing=True,
                     pretrain_path="./dm_g2_pre_state_dict.pkl", **load_kwargs):
@@ -761,12 +797,14 @@ class DM_GATE2(Disaggregator):
                                                                           'transfer')
                     # print("Train df", train_main)
                     transfer_main = pd.concat(transfer_main, axis=0).values
-                    transfer_main = transfer_main.reshape((-1, self.sequence_length, 1))
+                    # transfer_main = transfer_main.reshape((-1, self.sequence_length, 1))
+                    transfer_main = transfer_main.reshape(-1, 1)
 
                     new_transfer_appliances = []
                     for app_name, app_df in transfer_app:
                         app_df = pd.concat(app_df, axis=0).values
-                        app_df = app_df.reshape((-1, self.sequence_length, 1))
+                        # app_df = app_df.reshape((-1, self.sequence_length, 1))
+                        app_df = app_df.reshape(-1, 1)
                         new_transfer_appliances.append((app_name, app_df))
                     transfer_appliances = new_transfer_appliances
 
@@ -774,15 +812,15 @@ class DM_GATE2(Disaggregator):
                           "transfer app", transfer_appliances[0][1].shape)
 
                     plt.figure(figsize=(8, 4))
-                    plt.plot(transfer_main[0].reshape(-1), label='Transfer main')
+                    plt.plot(transfer_main.reshape(-1), label='Transfer main')
                     for i in range(len(transfer_appliances)):
-                        plt.plot(transfer_appliances[i][1][0].reshape(-1), label='Transfer truth')
+                        plt.plot(transfer_appliances[i][1].reshape(-1), label='Transfer truth')
                     # plt.plot(pred_overall[clf][i], label='')
                     plt.title("Transfer")
                     plt.legend()
                     plt.show()
             else:
-                raise RuntimeError("If sda is set True, 'dst_main' must be provided")
+                raise RuntimeError("If sda/fine_tune is set True, 'dst_main' must be provided")
         else:
             transfer_main = None
             transfer_appliances = None
@@ -864,8 +902,7 @@ class DM_GATE2(Disaggregator):
             else:
                 ckpt_name = "./" + appliance_name + "_" + self.load_from + "_dm_best_state_dict.pt"
             print("Loaded from", ckpt_name)
-            self.models[appliance_name].load_state_dict(
-                torch.load(ckpt_name))
+            model.load_state_dict(torch.load(ckpt_name))
 
             if self.fine_tune:
                 print("Fine tuning")
@@ -874,22 +911,34 @@ class DM_GATE2(Disaggregator):
                 # model.freeze(True)
 
                 fine_tune(appliance_name, model,
-                          train_main, power,
+                          # train_main, power,
                           transfer_main, app_dst_power,
                           self.sequence_length,
                           self.n_epochs, self.batch_size,
-                          pretrain,
+                          threshold,
+                          self.note,
                           src_rate=self.src_rate,
+                          filter_train=self.filter_train,
                           checkpoint_interval=1,
                           train_patience=3,
                           lr=self.lr,
                           src_dataset=self.load_from,
-                          freeze=self.freeze)
+                          freeze=self.freeze,
+                          weight_decay=self.weight_decay)
 
-                if self.freeze:
-                    ckpt_name = "./" + appliance_name + "_dm_ft_freeze_best_state_dict.pt"
-                else:
-                    ckpt_name = "./" + appliance_name + "_dm_ft_best_state_dict.pt"
+                ckpt_name = ("./" + appliance_name + "_" +
+                             self.note + f"_dm{'_g2' if self.filter_train else ''}" +
+                             "_best_state_dict.pt")
+                # if self.freeze:
+                #     if self.filter_train:
+                #         ckpt_name = "./" + appliance_name + "_dm_g2_ft_freeze_best_state_dict.pt"
+                #     else:
+                #         ckpt_name = "./" + appliance_name + "_dm_ft_freeze_best_state_dict.pt"
+                # else:
+                #     if self.filter_train:
+                #         ckpt_name = "./" + appliance_name + "_dm_g2_ft_best_state_dict.pt"
+                #     else:
+                #         ckpt_name = "./" + appliance_name + "_dm_ft_best_state_dict.pt"
                 # ckpt_name = "./fridge_dm_checkpoint_26_epoch.pt"
                 print("Loaded from", ckpt_name)
                 self.models[appliance_name].load_state_dict(
@@ -996,6 +1045,8 @@ class DM_GATE2(Disaggregator):
                 app_std = self.appliance_params[appliance_name]['std']
                 app_min = self.appliance_params[appliance_name]['min']
                 app_max = self.appliance_params[appliance_name]['max']
+
+                print("Transfer app min", app_min, "Transfer app max", app_max)
 
                 processed_app_dfs = []
                 for app_df in app_df_list:
@@ -1136,7 +1187,9 @@ class DM_GATE2(Disaggregator):
             self.appliance_params.update({app_name: {'mean': app_mean,
                                                      'std': app_std,
                                                      'min': 0,
-                                                     'max': np.max(l)}})
+                                                     'max': self.app_meta[app_name]['max']
+                                                     # 'max': np.max(l)
+                                                     }})
 
     def set_transfer_appliance_params(self, transfer_appliances):
         # Set appliance mean and std to normalize the label(appliance data)
@@ -1147,4 +1200,6 @@ class DM_GATE2(Disaggregator):
             self.appliance_params_transfer.update({app_name: {'mean': app_mean,
                                                               'std': app_std,
                                                               'min': 0,
-                                                              'max': np.max(l)}})
+                                                              'max': self.app_meta[app_name]['max']
+                                                              # 'max': np.max(l)
+                                                              }})
